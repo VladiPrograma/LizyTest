@@ -1,7 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   Eye,
   EyeOff,
@@ -9,6 +10,13 @@ import {
   Mail,
   UserRound,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/components/providers/auth-provider";
 import { cn } from "@/lib/utils";
@@ -102,18 +110,34 @@ function InputShell({
 }
 
 export function AuthScreen() {
-  const { login, register, sendPasswordReset, signInWithGoogle } = useAuth();
+  const { isAuthenticated, isLoading, login, register, sendPasswordReset, signInWithGoogle } = useAuth();
   const [mode, setMode] = useState<AuthMode>("login");
   const [form, setForm] = useState<FormState>(initialFormState);
   const [showPassword, setShowPassword] = useState(false);
+  const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetFeedback, setResetFeedback] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<FeedbackState>({
     tone: "idle",
     message: "",
   });
   const [isPending, startTransition] = useTransition();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      router.replace("/dashboard");
+    }
+  }, [isAuthenticated, isLoading, router]);
 
   const updateField = (field: keyof FormState, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const handleForgotPasswordOpen = () => {
+    setResetEmail(form.email);
+    setResetFeedback(null);
+    setIsForgotPasswordOpen(true);
   };
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
@@ -129,7 +153,7 @@ export function AuthScreen() {
             displayName: form.firstName || undefined,
             persistence: "local",
           });
-          setFeedback({ tone: "success", message: "Account created successfully." });
+          router.replace("/dashboard");
           return;
         }
 
@@ -138,27 +162,32 @@ export function AuthScreen() {
           password: form.password,
           persistence: "local",
         });
-        setFeedback({ tone: "success", message: "Signed in successfully." });
+        router.replace("/dashboard");
       } catch (error) {
         setFeedback({ tone: "error", message: normalizeFirebaseMessage(error) });
       }
     });
   };
 
-  const handlePasswordReset = () => {
-    if (!form.email) {
-      setFeedback({ tone: "error", message: "Enter your email to recover your password." });
+  const handlePasswordReset = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!resetEmail.trim()) {
+      setResetFeedback("Enter your email to recover your password.");
       return;
     }
 
+    setResetFeedback(null);
     setFeedback({ tone: "idle", message: "" });
 
     startTransition(async () => {
       try {
-        await sendPasswordReset(form.email);
+        await sendPasswordReset(resetEmail.trim());
+        setIsForgotPasswordOpen(false);
+        setResetEmail("");
         setFeedback({ tone: "success", message: "Password recovery email sent." });
       } catch (error) {
-        setFeedback({ tone: "error", message: normalizeFirebaseMessage(error) });
+        setResetFeedback(normalizeFirebaseMessage(error));
       }
     });
   };
@@ -169,7 +198,7 @@ export function AuthScreen() {
     startTransition(async () => {
       try {
         await signInWithGoogle("local");
-        setFeedback({ tone: "success", message: "Signed in with Google successfully." });
+        router.replace("/dashboard");
       } catch (error) {
         setFeedback({ tone: "error", message: normalizeFirebaseMessage(error) });
       }
@@ -288,7 +317,7 @@ export function AuthScreen() {
                 <div className="flex justify-end pr-2 pt-1">
                   <button
                     className="border-none bg-transparent text-[14px] font-semibold text-[#3885d8]"
-                    onClick={handlePasswordReset}
+                    onClick={handleForgotPasswordOpen}
                     type="button"
                   >
                     Forgot password?
@@ -356,6 +385,49 @@ export function AuthScreen() {
           </div>
         </section>
       </div>
+
+      <Dialog
+        onOpenChange={(open) => {
+          setIsForgotPasswordOpen(open);
+          if (!open) {
+            setResetFeedback(null);
+          }
+        }}
+        open={isForgotPasswordOpen}
+      >
+        <DialogContent className="max-w-[440px] rounded-[28px] border border-[#e8e1d7] bg-white p-8 text-[#211d18] shadow-[0_30px_90px_rgba(10,24,38,0.24)]">
+          <DialogHeader className="space-y-2 text-left">
+            <DialogTitle className="text-[28px] font-semibold tracking-[-0.03em] text-[#111111]">
+              Recover password
+            </DialogTitle>
+            <DialogDescription className="text-[15px] leading-6 text-[#7c756b]">
+              Enter your account email and we will send you a password recovery link.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form className="mt-4 flex flex-col" onSubmit={handlePasswordReset}>
+            <InputShell
+              icon={<Mail className="h-[18px] w-[18px]" strokeWidth={2.1} />}
+              onChange={setResetEmail}
+              placeholder="Email"
+              type="email"
+              value={resetEmail}
+            />
+
+            <p className={cn("min-h-6 pt-2 text-left text-[14px] font-medium", resetFeedback ? "text-[#d44242]" : "text-transparent")}>
+              {resetFeedback || "."}
+            </p>
+
+            <Button
+              className="mt-4 h-[48px] w-full rounded-[16px] bg-[#262626] text-[18px] font-medium text-white hover:bg-[#1f1f1f]"
+              disabled={isPending}
+              type="submit"
+            >
+              Send email
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }
