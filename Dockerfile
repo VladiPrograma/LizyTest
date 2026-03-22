@@ -1,18 +1,6 @@
 # Build stage
 FROM oven/bun:1 AS builder
 
-# Set build arguments
-ARG BETTER_AUTH_SECRET
-ARG RESEND_API_KEY
-ARG RESEND_FROM_EMAIL
-ARG DATABASE_URL
-
-# Set environment variables for build
-ENV BETTER_AUTH_SECRET=$BETTER_AUTH_SECRET
-ENV RESEND_API_KEY=$RESEND_API_KEY
-ENV RESEND_FROM_EMAIL=$RESEND_FROM_EMAIL
-ENV DATABASE_URL=$DATABASE_URL
-
 WORKDIR /app
 
 # Copy package files
@@ -40,7 +28,6 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/public ./public
-COPY --from=builder /app/drizzle ./drizzle
 
 # Set runtime environment variables
 ENV NODE_ENV=production
