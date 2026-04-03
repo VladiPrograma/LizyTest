@@ -3,6 +3,44 @@
 :root {
   --background: #ffffff;
   --foreground: #111111;
+  --accent-blue: #2563eb;
+  --accent-blue-light: #eff6ff;
+  --bg-light: #f7f8fa;
+  --bg-page: #f9fafb;
+  --bg-white: #ffffff;
+  --border-color: #e5e7eb;
+  --cat-energy: #d97706;
+  --cat-housing: #6366f1;
+  --cat-office: #14b8a6;
+  --cat-office-bg: #f0fdfa;
+  --cat-restaurant: #f97316;
+  --cat-restaurant-bg: #fff7ed;
+  --cat-services: #8b5cf6;
+  --cat-services-bg: #f5f3ff;
+  --cat-software: #ec4899;
+  --cat-software-bg: #fdf2f8;
+  --cat-transport: #0ea5e9;
+  --cat-transport-bg: #f0f9ff;
+  --danger-red: #dc2626;
+  --success-green: #16a34a;
+  --text-muted: #9ca3af;
+  --text-primary: #111111;
+  --text-secondary: #6b7280;
+  --payments-page-background: #f4f7fb;
+  --payments-page-warm: #fff8ee;
+  --payments-accent-glow: #93c5fd40;
+  --payments-amber-glow: #f59e0b24;
+  --payments-drawer-start: #0f172a;
+  --payments-drawer-end: #1e3a8a;
+  --payments-drawer-label: #93c5fd;
+  --payments-drawer-muted: #c7d2fe;
+  --payments-brand-start: #38bdf8;
+  --payments-brand-end: #2563eb;
+  --payments-shell-ink: #0f172a;
+  --payments-soft-blue-panel: #f8fbff;
+  --payments-soft-blue-border: #bfdbfe;
+  --payments-soft-blue-icon: #dbeafe;
+  --payments-add-card-title: #1f2937;
 }
 
 @theme inline {
@@ -12,15 +50,16 @@
   --font-mono: var(--font-geist-mono);
 }
 
-* {
-  box-sizing: border-box;
-}
+@layer base {
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+  }
 
-html,
-body {
-  margin: 0;
-  min-height: 100vh;
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-geist-sans), sans-serif;
+  body {
+    font-family: var(--font-geist-sans), sans-serif;
+  }
 }

@@ -1,5 +1,6 @@
-import { DashboardScreen } from "@/components/dashboard/dashboard-screen";
+import { redirect } from "next/navigation";
+import { DASHBOARD_HOME_PATH } from "@/lib/routes";
 
 export default function DashboardPage() {
-  return <DashboardScreen />;
+  redirect(DASHBOARD_HOME_PATH);
 }

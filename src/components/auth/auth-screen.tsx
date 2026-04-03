@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/components/providers/auth-provider";
+import { DASHBOARD_HOME_PATH } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 
 type AuthMode = "login" | "register";
@@ -126,7 +127,7 @@ export function AuthScreen() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      router.replace("/dashboard");
+      router.replace(DASHBOARD_HOME_PATH);
     }
   }, [isAuthenticated, isLoading, router]);
 
@@ -153,7 +154,7 @@ export function AuthScreen() {
             displayName: form.firstName || undefined,
             persistence: "local",
           });
-          router.replace("/dashboard");
+          router.replace(DASHBOARD_HOME_PATH);
           return;
         }
 
@@ -162,7 +163,7 @@ export function AuthScreen() {
           password: form.password,
           persistence: "local",
         });
-        router.replace("/dashboard");
+        router.replace(DASHBOARD_HOME_PATH);
       } catch (error) {
         setFeedback({ tone: "error", message: normalizeFirebaseMessage(error) });
       }
@@ -198,7 +199,7 @@ export function AuthScreen() {
     startTransition(async () => {
       try {
         await signInWithGoogle("local");
-        router.replace("/dashboard");
+        router.replace(DASHBOARD_HOME_PATH);
       } catch (error) {
         setFeedback({ tone: "error", message: normalizeFirebaseMessage(error) });
       }
