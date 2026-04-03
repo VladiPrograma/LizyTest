@@ -74,18 +74,38 @@ const isProblemDetails = (value: unknown): value is ProblemDetails => {
   return "title" in value || "status" in value || "detail" in value || "path" in value;
 };
 
-const isIsoDateString = (value: string) => {
+const parseDateParts = (value: string) => {
   if (!DATE_PATTERN.test(value)) {
+    return null;
+  }
+
+  const [year, month, day] = value.split("-").map(Number);
+
+  if ([year, month, day].some(Number.isNaN)) {
+    return null;
+  }
+
+  return { year, month, day };
+};
+
+const isIsoDateString = (value: string) => {
+  const parts = parseDateParts(value);
+
+  if (!parts) {
     return false;
   }
 
-  const date = new Date(`${value}T00:00:00`);
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
 
   if (Number.isNaN(date.getTime())) {
     return false;
   }
 
-  return date.toISOString().slice(0, 10) === value;
+  return (
+    date.getUTCFullYear() === parts.year &&
+    date.getUTCMonth() === parts.month - 1 &&
+    date.getUTCDate() === parts.day
+  );
 };
 
 const isPastOrToday = (value: string) => {
@@ -119,8 +139,8 @@ const validateCreatePayload = (payload: CreateUserPayload) => {
     throw new Error("currency must be a 3-letter uppercase ISO code.");
   }
 
-  if (!isIsoDateString(payload.birthDate)) {
-    throw new Error("birthDate must use YYYY-MM-DD format.");
+  if (!isPastOrToday(payload.birthDate)) {
+    throw new Error("birthDate must use YYYY-MM-DD format and be in the past or present.");
   }
 };
 

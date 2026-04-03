@@ -2,18 +2,18 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useRef, useState, useTransition, type ChangeEvent, type ReactNode } from "react";
 import {
   Activity,
   ArrowDown,
+  ArrowRight,
   ArrowUpDown,
-  BadgeEuro,
   Building2,
   Calendar,
   CalendarCheck,
   CalendarDays,
   CalendarRange,
-  ChevronDown,
+  CalendarSearch,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
@@ -37,17 +37,24 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { Button } from "@/components/ui/button";
+import { CompactSelectField, DateField, SelectField, type SelectFieldOption } from "@/components/ui/select-field";
 import {
   fixedExpenses,
-  monthOptions,
   mortgageSummary,
-  paymentEntries,
+  type PaymentEntry,
   rowsPerPageOptions,
   sidebarSections,
   type PaymentCategoryTone,
   variableExpenses,
-  yearOptions,
 } from "@/components/payments-history/payments-history-data";
+import { bankService, BankServiceError } from "@/services/bank.service";
+import {
+  paymentsService,
+  PaymentsServiceError,
+  type PaymentDto,
+  type PaymentSortField,
+  type SortDirection,
+} from "@/services/payments.service";
 import { cn } from "@/lib/utils";
 
 const euroFormatter = new Intl.NumberFormat("es-ES", {
@@ -103,8 +110,163 @@ const navIconMap: Record<string, LucideIcon> = {
   "Cerrar sesión": ChevronRight,
 };
 
-const businessOptions = ["Todos los negocios", ...new Set(paymentEntries.map((entry) => entry.business))];
-const categoryOptions = ["Todas las categorías", ...new Set(paymentEntries.map((entry) => entry.category))];
+const ALL_BUSINESSES_LABEL = "Todos los negocios";
+const ALL_CATEGORIES_LABEL = "Todas las categorías";
+
+const monthFormatter = new Intl.DateTimeFormat("es-ES", { month: "long", timeZone: "UTC" });
+const displayDateFormatter = new Intl.DateTimeFormat("es-ES", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
+const monthNameByIndex = Array.from({ length: 12 }, (_, monthIndex) => {
+  const monthName = monthFormatter.format(new Date(Date.UTC(2026, monthIndex, 1)));
+
+  return monthName.charAt(0).toUpperCase() + monthName.slice(1);
+});
+const monthIndexByName = new Map(monthNameByIndex.map((monthName, index) => [monthName, index]));
+const selectableMonthOptions = [...monthNameByIndex].reverse();
+const defaultPeriodSelection = getPreviousMonthPeriod();
+const selectableYearOptions = Array.from({ length: 6 }, (_, index) => String(Number(defaultPeriodSelection.year) - index));
+const defaultCustomDateRange = buildDateRange("Mensual", defaultPeriodSelection.month, defaultPeriodSelection.year);
+const defaultSortDirectionByField: Record<PaymentSortField, SortDirection> = {
+  alias: "ASC",
+  amount: "DESC",
+  business: "ASC",
+  businessName: "ASC",
+  category: "ASC",
+  currency: "ASC",
+  date: "DESC",
+  description: "ASC",
+  needsReview: "DESC",
+  operationType: "ASC",
+  type: "ASC",
+};
+
+const paymentCategoryFallbacks: Record<PaymentCategoryTone, { label: string; keywords: string[] }> = {
+  office: { label: "Oficina", keywords: ["amazon", "papeler", "office", "material"] },
+  restaurant: { label: "Restaurantes", keywords: ["rest", "cafe", "bar", "uber eats", "glovo", "deliveroo"] },
+  services: { label: "Servicios", keywords: ["stripe", "tax", "seguro", "agency", "freelance", "service"] },
+  software: { label: "Software", keywords: ["notion", "google", "microsoft", "slack", "figma", "software"] },
+  transport: { label: "Transporte", keywords: ["uber", "metro", "renfe", "cabify", "bolt", "transport"] },
+};
+
+function normalizeImportMessage(error: unknown) {
+  if (error instanceof BankServiceError) {
+    return error.problem?.detail || error.message;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "No se pudo importar el fichero Excel.";
+}
+
+function normalizePaymentsMessage(error: unknown) {
+  if (error instanceof PaymentsServiceError) {
+    return error.problem?.detail || error.message;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "No se pudieron cargar los pagos.";
+}
+
+function getCategoryToneFromPayment(payment: {
+  businessName: string | null;
+  category: string | null;
+  type: "ADD" | "SUBTRACT";
+}): PaymentCategoryTone {
+  const source = `${payment.category || ""} ${payment.businessName || ""}`.toLowerCase();
+
+  for (const [tone, config] of Object.entries(paymentCategoryFallbacks) as [PaymentCategoryTone, (typeof paymentCategoryFallbacks)[PaymentCategoryTone]][]) {
+    if (config.keywords.some((keyword) => source.includes(keyword))) {
+      return tone;
+    }
+  }
+
+  return payment.type === "ADD" ? "services" : "office";
+}
+
+function toDisplayDate(date: string) {
+  return displayDateFormatter.format(new Date(`${date}T00:00:00Z`));
+}
+
+function toPeriodMonth(date: string) {
+  const monthName = monthFormatter.format(new Date(`${date}T00:00:00Z`));
+
+  return monthName.charAt(0).toUpperCase() + monthName.slice(1);
+}
+
+function getPreviousMonthPeriod(baseDate = new Date()) {
+  const previousMonthDate = new Date(Date.UTC(baseDate.getFullYear(), baseDate.getMonth() - 1, 1));
+
+  return {
+    month: toPeriodMonth(previousMonthDate.toISOString().slice(0, 10)),
+    year: String(previousMonthDate.getUTCFullYear()),
+  };
+}
+
+function buildDateRange(
+  period: "Mensual" | "Anual" | "Personalizado",
+  month: string,
+  year: string,
+  customDateRange?: { startDate: string; endDate: string },
+) {
+  if (period === "Personalizado") {
+    if (!customDateRange?.startDate || !customDateRange.endDate) {
+      throw new Error("Debes indicar una fecha de inicio y una fecha de fin.");
+    }
+
+    if (customDateRange.startDate > customDateRange.endDate) {
+      throw new Error("La fecha de inicio no puede ser posterior a la fecha de fin.");
+    }
+
+    return customDateRange;
+  }
+
+  if (period === "Anual") {
+    return {
+      endDate: `${year}-12-31`,
+      startDate: `${year}-01-01`,
+    };
+  }
+
+  const monthIndex = monthIndexByName.get(month);
+
+  if (monthIndex === undefined) {
+    throw new Error("El mes seleccionado no es válido.");
+  }
+
+  const lastDay = new Date(Date.UTC(Number(year), monthIndex + 1, 0)).getUTCDate();
+
+  return {
+    endDate: `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+    startDate: `${year}-${String(monthIndex + 1).padStart(2, "0")}-01`,
+  };
+}
+
+function mapPaymentToEntry(payment: PaymentDto): PaymentEntry {
+  const categoryTone = getCategoryToneFromPayment(payment);
+
+  return {
+    amount: payment.amount,
+    business: payment.businessName || (payment.type === "ADD" ? "Ingreso" : "Sin negocio"),
+    category: payment.category || paymentCategoryFallbacks[categoryTone].label,
+    categoryTone,
+    description: payment.description || (payment.type === "ADD" ? "Ingreso registrado" : "Movimiento registrado"),
+    direction: payment.type === "ADD" ? "incoming" : "outgoing",
+    displayDate: toDisplayDate(payment.date),
+    id: payment.id,
+    periodMonth: toPeriodMonth(payment.date),
+    periodYear: payment.date.slice(0, 4),
+    statusLabel: payment.needsReview ? "Pendiente de procesar" : undefined,
+  };
+}
 
 function formatEuroAmount(amount: number) {
   return `${euroFormatter.format(amount)} EUR`;
@@ -113,43 +275,6 @@ function formatEuroAmount(amount: number) {
 function formatSignedAmount(amount: number, direction: "incoming" | "outgoing") {
   const prefix = direction === "incoming" ? "+" : "";
   return `${prefix}${formatEuroAmount(amount)}`;
-}
-
-function SelectShell({
-  icon: Icon,
-  label,
-  value,
-  onChange,
-  children,
-  className,
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: string | number;
-  onChange: (value: string) => void;
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <label
-      className={cn(
-        "relative flex h-9 items-center gap-2 rounded-[6px] border border-[var(--border-color)] bg-[var(--bg-white)] px-3 text-[13px] text-[var(--text-primary)] shadow-[0_1px_0_var(--white-alpha-70)]",
-        className,
-      )}
-    >
-      <Icon className="h-[14px] w-[14px] text-[var(--accent-blue)]" />
-      <span className="sr-only">{label}</span>
-      <select
-        aria-label={label}
-        className="h-full w-full appearance-none bg-transparent pr-5 text-[13px] font-medium outline-none"
-        onChange={(event) => onChange(event.target.value)}
-        value={value}
-      >
-        {children}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--text-muted)]" />
-    </label>
-  );
 }
 
 function SidebarNavItem({
@@ -207,6 +332,57 @@ function PaymentCategoryBadge({
       <span className={cn("h-[7px] w-[7px] rounded-full", categoryToneClasses[tone].dot)} />
       {label}
     </span>
+  );
+}
+
+function ReviewStatusBadge({ label }: { label: string }) {
+  return (
+    <span className="inline-flex h-6 w-fit items-center gap-1 rounded-full bg-[var(--cat-restaurant-bg)] px-2 text-[11px] font-semibold text-[var(--cat-restaurant)]">
+      <CircleAlert className="h-3 w-3 shrink-0" />
+      <span>{label}</span>
+      <ArrowRight className="h-[11px] w-[11px] shrink-0" />
+    </span>
+  );
+}
+
+function SortableHeader({
+  active,
+  align = "left",
+  direction,
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  align?: "left" | "right";
+  direction: SortDirection;
+  icon?: LucideIcon;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={cn(
+        "group inline-flex items-center gap-2 text-[12px] font-semibold tracking-[0.04em] transition-colors",
+        align === "right" ? "w-full justify-end" : "justify-start",
+        active ? "text-[var(--accent-blue)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+      )}
+      onClick={onClick}
+      type="button"
+    >
+      {Icon ? <Icon className="h-[13px] w-[13px]" /> : null}
+      <span>{label}</span>
+      {active ? (
+        <ArrowDown
+          className={cn(
+            "h-3 w-3 transition-transform",
+            direction === "ASC" ? "rotate-180" : "rotate-0",
+          )}
+        />
+      ) : (
+        <ArrowUpDown className="h-3 w-3 text-[var(--text-muted)] transition-colors group-hover:text-[var(--text-secondary)]" />
+      )}
+    </button>
   );
 }
 
@@ -273,12 +449,7 @@ function MobilePaymentCard({
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <PaymentCategoryBadge label={category} tone={categoryTone} />
-        {statusLabel ? (
-          <span className="inline-flex h-6 items-center gap-1 rounded-full bg-[var(--cat-restaurant-bg)] px-2 text-[11px] font-semibold text-[var(--cat-restaurant)]">
-            <CircleAlert className="h-3 w-3" />
-            {statusLabel}
-          </span>
-        ) : null}
+        {statusLabel ? <ReviewStatusBadge label={statusLabel} /> : null}
       </div>
     </article>
   );
@@ -287,14 +458,48 @@ function MobilePaymentCard({
 export function PaymentsHistoryScreen() {
   const { isAuthenticated, isLoading, logout } = useAuth();
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [period, setPeriod] = useState<"Mensual" | "Anual">("Mensual");
-  const [selectedMonth, setSelectedMonth] = useState<(typeof monthOptions)[number]>("Abril");
-  const [selectedYear, setSelectedYear] = useState<(typeof yearOptions)[number]>("2026");
-  const [selectedCategory, setSelectedCategory] = useState("Todas las categorías");
-  const [selectedBusiness, setSelectedBusiness] = useState("Todos los negocios");
+  const [payments, setPayments] = useState<PaymentEntry[]>([]);
+  const [totalIncoming, setTotalIncoming] = useState(0);
+  const [totalOutgoing, setTotalOutgoing] = useState(0);
+  const [totalItems, setTotalItems] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [isPaymentsLoading, setIsPaymentsLoading] = useState(false);
+  const [hasResolvedPayments, setHasResolvedPayments] = useState(false);
+  const [paymentsError, setPaymentsError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [isImportingExcel, setIsImportingExcel] = useState(false);
+  const [importFeedback, setImportFeedback] = useState<string | null>(null);
+  const [period, setPeriod] = useState<"Mensual" | "Anual" | "Personalizado">("Mensual");
+  const [selectedMonth, setSelectedMonth] = useState<string>(defaultPeriodSelection.month);
+  const [selectedYear, setSelectedYear] = useState<string>(defaultPeriodSelection.year);
+  const [customStartDate, setCustomStartDate] = useState(defaultCustomDateRange.startDate);
+  const [customEndDate, setCustomEndDate] = useState(defaultCustomDateRange.endDate);
+  const [selectedCategory, setSelectedCategory] = useState(ALL_CATEGORIES_LABEL);
+  const [selectedBusiness, setSelectedBusiness] = useState(ALL_BUSINESSES_LABEL);
+  const [sortField, setSortField] = useState<PaymentSortField>("date");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("DESC");
   const [rowsPerPage, setRowsPerPage] = useState<(typeof rowsPerPageOptions)[number]>(6);
   const [currentPage, setCurrentPage] = useState(1);
+  const [availableCategoryValues, setAvailableCategoryValues] = useState<string[]>([]);
+  const [availableBusinessValues, setAvailableBusinessValues] = useState<string[]>([]);
+  const availableYearOptions = selectableYearOptions;
+  const availableMonthOptions = selectableMonthOptions;
+  const availableCategoryOptions = [ALL_CATEGORIES_LABEL, ...availableCategoryValues];
+  const availableBusinessOptions = [ALL_BUSINESSES_LABEL, ...availableBusinessValues];
+  const monthSelectOptions: SelectFieldOption[] = availableMonthOptions.map((option) => ({ label: option, value: option }));
+  const yearSelectOptions: SelectFieldOption[] = availableYearOptions.map((option) => ({ label: option, value: option }));
+  const categorySelectOptions: SelectFieldOption[] = availableCategoryOptions.map((option) => ({ label: option, value: option }));
+  const businessSelectOptions: SelectFieldOption[] = availableBusinessOptions.map((option) => ({ label: option, value: option }));
+  const rowsPerPageSelectOptions: SelectFieldOption[] = rowsPerPageOptions.map((option) => ({
+    label: `${option} por página`,
+    value: option,
+  }));
+  const pageSelectOptions: SelectFieldOption[] = Array.from({ length: totalPages }, (_, index) => ({
+    label: `Página ${index + 1} de ${totalPages}`,
+    value: index + 1,
+  }));
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -302,50 +507,168 @@ export function PaymentsHistoryScreen() {
     }
   }, [isAuthenticated, isLoading, router]);
 
+  useEffect(() => {
+    if (!availableYearOptions.includes(selectedYear)) {
+      setSelectedYear(defaultPeriodSelection.year);
+    }
+  }, [availableYearOptions, selectedYear]);
+
+  useEffect(() => {
+    if (period === "Mensual" && !availableMonthOptions.includes(selectedMonth)) {
+      setSelectedMonth(defaultPeriodSelection.month);
+    }
+  }, [availableMonthOptions, period, selectedMonth]);
+
+  useEffect(() => {
+    if (![ALL_CATEGORIES_LABEL, ...availableCategoryValues].includes(selectedCategory)) {
+      setSelectedCategory(ALL_CATEGORIES_LABEL);
+    }
+  }, [availableCategoryValues, selectedCategory]);
+
+  useEffect(() => {
+    if (![ALL_BUSINESSES_LABEL, ...availableBusinessValues].includes(selectedBusiness)) {
+      setSelectedBusiness(ALL_BUSINESSES_LABEL);
+    }
+  }, [availableBusinessValues, selectedBusiness]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
   const handleLogout = () => {
     startTransition(async () => {
       await logout();
       router.replace("/");
     });
   };
-
-  const filteredPayments = paymentEntries.filter((entry) => {
-    const matchesPeriod =
-      period === "Anual"
-        ? entry.periodYear === selectedYear
-        : entry.periodYear === selectedYear && entry.periodMonth === selectedMonth;
-    const matchesCategory = selectedCategory === "Todas las categorías" || entry.category === selectedCategory;
-    const matchesBusiness = selectedBusiness === "Todos los negocios" || entry.business === selectedBusiness;
-
-    return matchesPeriod && matchesCategory && matchesBusiness;
-  });
-
-  const totalIncoming = filteredPayments.reduce(
-    (sum, entry) => sum + (entry.direction === "incoming" ? entry.amount : 0),
-    0,
-  );
-  const totalOutgoing = filteredPayments.reduce(
-    (sum, entry) => sum + (entry.direction === "outgoing" ? entry.amount : 0),
-    0,
-  );
-
-  const totalPages = Math.max(1, Math.ceil(filteredPayments.length / rowsPerPage));
   const safePage = Math.min(currentPage, totalPages);
   const pageStart = (safePage - 1) * rowsPerPage;
-  const paginatedPayments = filteredPayments.slice(pageStart, pageStart + rowsPerPage);
+  const isInitialPaymentsLoad = isPaymentsLoading && !hasResolvedPayments;
 
-  const handlePeriodChange = (nextPeriod: "Mensual" | "Anual") => {
+  useEffect(() => {
+    if (isLoading || !isAuthenticated) {
+      return;
+    }
+
+    let dateRange: { startDate: string; endDate: string };
+
+    try {
+      dateRange = buildDateRange(period, selectedMonth, selectedYear, {
+        endDate: customEndDate,
+        startDate: customStartDate,
+      });
+    } catch (error) {
+      setPaymentsError(normalizePaymentsMessage(error));
+      return;
+    }
+
+    const { endDate, startDate } = dateRange;
+    const categoryFilter = selectedCategory === ALL_CATEGORIES_LABEL ? undefined : selectedCategory;
+    const businessFilter = selectedBusiness === ALL_BUSINESSES_LABEL ? undefined : selectedBusiness;
+    let cancelled = false;
+
+    const loadPayments = async () => {
+      setIsPaymentsLoading(true);
+      setPaymentsError(null);
+
+      try {
+        const [paymentsPage, summary, groupedCategories, groupedBusinesses] = await Promise.all([
+          paymentsService.listPayments({
+            business: businessFilter,
+            category: categoryFilter,
+            direction: sortDirection,
+            endDate,
+            page: currentPage - 1,
+            size: rowsPerPage,
+            sort: sortField,
+            startDate,
+          }),
+          paymentsService.getSummary({ endDate, startDate }),
+          paymentsService.getGroupByCategory({ endDate, startDate }),
+          paymentsService.getGroupByBusiness({ endDate, startDate }),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setPayments(paymentsPage.items.map(mapPaymentToEntry));
+        setTotalItems(paymentsPage.totalItems);
+        setTotalPages(Math.max(1, paymentsPage.totalPages));
+        setAvailableCategoryValues(groupedCategories.map((group) => group.categoryName));
+        setAvailableBusinessValues(groupedBusinesses.map((group) => group.businessName));
+        setTotalIncoming(summary.find((entry) => entry.type === "ADD")?.totalAmount ?? 0);
+        setTotalOutgoing(summary.find((entry) => entry.type === "SUBTRACT")?.totalAmount ?? 0);
+        setHasResolvedPayments(true);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        if (!hasResolvedPayments) {
+          setPayments([]);
+          setTotalItems(0);
+          setTotalPages(1);
+          setTotalIncoming(0);
+          setTotalOutgoing(0);
+          setHasResolvedPayments(true);
+        }
+
+        setPaymentsError(normalizePaymentsMessage(error));
+      } finally {
+        if (!cancelled) {
+          setIsPaymentsLoading(false);
+        }
+      }
+    };
+
+    void loadPayments();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentPage,
+    isAuthenticated,
+    isLoading,
+    period,
+    reloadKey,
+    rowsPerPage,
+    selectedBusiness,
+    selectedCategory,
+    customEndDate,
+    customStartDate,
+    hasResolvedPayments,
+    selectedMonth,
+    selectedYear,
+    sortDirection,
+    sortField,
+  ]);
+
+  const handlePeriodChange = (nextPeriod: "Mensual" | "Anual" | "Personalizado") => {
     setPeriod(nextPeriod);
     setCurrentPage(1);
   };
 
   const handleMonthChange = (value: string) => {
-    setSelectedMonth(value as (typeof monthOptions)[number]);
+    setSelectedMonth(value);
     setCurrentPage(1);
   };
 
   const handleYearChange = (value: string) => {
-    setSelectedYear(value as (typeof yearOptions)[number]);
+    setSelectedYear(value);
+    setCurrentPage(1);
+  };
+
+  const handleCustomStartDateChange = (value: string) => {
+    setCustomStartDate(value);
+    setCurrentPage(1);
+  };
+
+  const handleCustomEndDateChange = (value: string) => {
+    setCustomEndDate(value);
     setCurrentPage(1);
   };
 
@@ -359,9 +682,56 @@ export function PaymentsHistoryScreen() {
     setCurrentPage(1);
   };
 
+  const handleSortChange = (field: PaymentSortField) => {
+    setCurrentPage(1);
+
+    if (sortField === field) {
+      setSortDirection((currentDirection) => (currentDirection === "ASC" ? "DESC" : "ASC"));
+      return;
+    }
+
+    setSortField(field);
+    setSortDirection(defaultSortDirectionByField[field]);
+  };
+
   const handleRowsPerPageChange = (value: string) => {
     setRowsPerPage(Number(value) as (typeof rowsPerPageOptions)[number]);
     setCurrentPage(1);
+  };
+
+  const handlePageChange = (value: string) => {
+    setCurrentPage(Number(value));
+  };
+
+  const handleExcelButtonClick = () => {
+    setImportFeedback(null);
+    fileInputRef.current?.click();
+  };
+
+  const handleExcelFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0];
+
+    if (!selectedFile) {
+      return;
+    }
+
+    setIsImportingExcel(true);
+    setImportFeedback(null);
+
+    try {
+      const importedPayments = await bankService.extractPayments(selectedFile);
+
+      setCurrentPage(1);
+      setSelectedCategory(ALL_CATEGORIES_LABEL);
+      setSelectedBusiness(ALL_BUSINESSES_LABEL);
+      setReloadKey((value) => value + 1);
+      setImportFeedback(`Importación completada: ${importedPayments.length} pagos guardados.`);
+    } catch (error) {
+      setImportFeedback(normalizeImportMessage(error));
+    } finally {
+      event.target.value = "";
+      setIsImportingExcel(false);
+    }
   };
 
   if (isLoading || !isAuthenticated) {
@@ -378,8 +748,8 @@ export function PaymentsHistoryScreen() {
     <main className="min-h-screen overflow-x-hidden bg-[linear-gradient(135deg,var(--payments-page-background)_0%,var(--payments-page-warm)_100%)] text-[var(--payments-shell-ink)]">
       <div className="pointer-events-none absolute right-8 top-14 hidden h-[220px] w-[220px] rounded-full bg-[var(--payments-accent-glow)] blur-3xl lg:block" />
       <div className="pointer-events-none absolute bottom-8 right-16 hidden h-[300px] w-[300px] rounded-full bg-[var(--payments-amber-glow)] blur-3xl lg:block" />
-      <div className="relative flex min-h-screen w-full flex-col overflow-hidden bg-[var(--bg-page)] xl:flex-row">
-        <aside className="flex shrink-0 flex-col gap-5 bg-[linear-gradient(180deg,var(--payments-drawer-start)_0%,var(--payments-drawer-end)_100%)] px-6 py-7 text-[var(--white)] xl:w-[284px]">
+      <div className="relative flex min-h-screen w-full flex-col bg-[var(--bg-page)] xl:flex-row">
+        <aside className="flex w-full shrink-0 flex-col gap-5 bg-[linear-gradient(180deg,var(--payments-drawer-start)_0%,var(--payments-drawer-end)_100%)] px-6 py-7 text-[var(--white)] xl:fixed xl:inset-y-0 xl:left-0 xl:z-30 xl:h-screen xl:w-[284px] xl:overflow-y-auto">
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[linear-gradient(135deg,var(--payments-brand-start)_0%,var(--payments-brand-end)_100%)] text-[20px] font-bold text-[var(--white)]">
               L
@@ -421,7 +791,7 @@ export function PaymentsHistoryScreen() {
             Cerrar sesión
           </Button>
         </aside>
-        <section className="flex min-w-0 flex-1 flex-col bg-[var(--bg-page)] p-5 sm:p-6 lg:p-10">
+        <section className="flex min-w-0 flex-1 flex-col bg-[var(--bg-page)] p-5 sm:p-6 lg:p-10 xl:ml-[284px] xl:min-h-screen">
           <div className="flex flex-col gap-7 rounded-[24px] bg-[var(--bg-page)]">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
               <div>
@@ -436,22 +806,47 @@ export function PaymentsHistoryScreen() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
+                <input
+                  accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  className="hidden"
+                  onChange={handleExcelFileChange}
+                  ref={fileInputRef}
+                  type="file"
+                />
                 <Button className="h-9 rounded-[8px] bg-[var(--bg-white)] px-3 text-[13px] font-semibold text-[var(--text-primary)] shadow-none ring-1 ring-[var(--border-color)] hover:bg-[var(--accent-blue-light)]">
                   <Plus className="h-4 w-4" />
                   Nuevo pago
                 </Button>
-                <Button className="h-9 rounded-[8px] bg-[var(--bg-white)] px-3 text-[13px] font-semibold text-[var(--text-secondary)] shadow-none ring-1 ring-[var(--border-color)] hover:bg-[var(--accent-blue-light)]">
+                <Button
+                  className="h-9 rounded-[8px] bg-[var(--bg-white)] px-3 text-[13px] font-semibold text-[var(--text-primary)] shadow-none ring-1 ring-[var(--border-color)] hover:bg-[var(--accent-blue-light)]"
+                  disabled={isImportingExcel}
+                  onClick={handleExcelButtonClick}
+                  type="button"
+                >
                   <Download className="h-4 w-4" />
-                  EXCEL
+                  {isImportingExcel ? "Importando..." : "EXCEL"}
                 </Button>
               </div>
             </div>
+            {importFeedback ? (
+              <p
+                className={cn(
+                  "text-[13px] font-medium",
+                  importFeedback.startsWith("Importación")
+                    ? "text-[var(--success-green)]"
+                    : "text-[var(--danger-red)]",
+                )}
+              >
+                {importFeedback}
+              </p>
+            ) : null}
+            {paymentsError ? <p className="text-[13px] font-medium text-[var(--danger-red)]">{paymentsError}</p> : null}
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex items-center gap-3">
                   <span className="text-[13px] font-medium text-[var(--text-secondary)]">Periodo:</span>
                   <div className="inline-flex h-[38px] rounded-[10px] border border-[var(--border-color)] bg-[var(--bg-white)] p-1">
-                    {(["Mensual", "Anual"] as const).map((value) => (
+                    {(["Mensual", "Anual", "Personalizado"] as const).map((value) => (
                       <button
                         className={cn(
                           "rounded-[8px] px-3 text-[13px] font-semibold transition-colors",
@@ -468,23 +863,46 @@ export function PaymentsHistoryScreen() {
                     ))}
                   </div>
                 </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-3 sm:ml-auto sm:w-full sm:max-w-[560px] sm:flex-row sm:flex-wrap sm:justify-end">
                   {period === "Mensual" ? (
-                    <SelectShell icon={CalendarRange} label="Mes" onChange={handleMonthChange} value={selectedMonth}>
-                      {monthOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </SelectShell>
+                    <SelectField
+                      className="w-full sm:w-[190px] sm:shrink-0"
+                      icon={CalendarRange}
+                      label="Mes"
+                      onChange={handleMonthChange}
+                      options={monthSelectOptions}
+                      value={selectedMonth}
+                    />
                   ) : null}
-                  <SelectShell icon={CalendarDays} label="Año" onChange={handleYearChange} value={selectedYear}>
-                    {yearOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </SelectShell>
+                  {period !== "Personalizado" ? (
+                    <SelectField
+                      className="w-full sm:w-[160px] sm:shrink-0"
+                      icon={CalendarDays}
+                      label="Año"
+                      onChange={handleYearChange}
+                      options={yearSelectOptions}
+                      value={selectedYear}
+                    />
+                  ) : (
+                    <>
+                      <DateField
+                        className="w-full sm:w-[190px] sm:shrink-0"
+                        icon={CalendarRange}
+                        label="Desde"
+                        max={customEndDate}
+                        onChange={handleCustomStartDateChange}
+                        value={customStartDate}
+                      />
+                      <DateField
+                        className="w-full sm:w-[190px] sm:shrink-0"
+                        icon={CalendarRange}
+                        label="Hasta"
+                        min={customStartDate}
+                        onChange={handleCustomEndDateChange}
+                        value={customEndDate}
+                      />
+                    </>
+                  )}
                 </div>
               </div>
               <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -493,34 +911,21 @@ export function PaymentsHistoryScreen() {
                     <Tag className="h-4 w-4 text-[var(--text-secondary)]" />
                     <span>Filtros:</span>
                   </div>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    <SelectShell icon={Tag} label="Categoría" onChange={handleCategoryChange} value={selectedCategory}>
-                      {categoryOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </SelectShell>
-                    <SelectShell icon={Building2} label="Negocio" onChange={handleBusinessChange} value={selectedBusiness}>
-                      {businessOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </SelectShell>
-                    <SelectShell
-                      className="min-w-[170px]"
-                      icon={BadgeEuro}
-                      label="Importe"
-                      onChange={handleRowsPerPageChange}
-                      value={rowsPerPage}
-                    >
-                      {rowsPerPageOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option} por página
-                        </option>
-                      ))}
-                    </SelectShell>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-2">
+                    <SelectField
+                      icon={Tag}
+                      label="Categoría"
+                      onChange={handleCategoryChange}
+                      options={categorySelectOptions}
+                      value={selectedCategory}
+                    />
+                    <SelectField
+                      icon={Building2}
+                      label="Negocio"
+                      onChange={handleBusinessChange}
+                      options={businessSelectOptions}
+                      value={selectedBusiness}
+                    />
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-6 text-[14px] font-semibold">
@@ -535,59 +940,90 @@ export function PaymentsHistoryScreen() {
                 </div>
               </div>
             </div>
-            <div className="overflow-hidden rounded-[10px] border border-[var(--border-color)] bg-[var(--bg-white)]">
+            <div className="relative overflow-hidden rounded-[10px] border border-[var(--border-color)] bg-[var(--bg-white)]">
+              {isPaymentsLoading && hasResolvedPayments ? (
+                <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-end p-3">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border-color)] bg-[var(--white-alpha-90)] px-3 py-1.5 text-[12px] font-medium text-[var(--text-secondary)] shadow-[0_8px_24px_var(--navy-alpha-08)] backdrop-blur">
+                    <Activity className="h-3.5 w-3.5 animate-spin text-[var(--accent-blue)]" />
+                    Actualizando tabla...
+                  </div>
+                </div>
+              ) : null}
               <div className="hidden overflow-x-auto lg:block">
                 <table className="w-full min-w-[980px] border-separate border-spacing-0">
                   <thead className="bg-[var(--bg-light)] text-left">
                     <tr>
                       <th className="w-[140px] px-5 py-4 text-[12px] font-semibold tracking-[0.04em] text-[var(--accent-blue)]">
-                        <div className="flex items-center gap-2">
-                          <Calendar className="h-[13px] w-[13px]" />
-                          Fecha
-                          <ArrowDown className="h-3 w-3" />
-                        </div>
+                        <SortableHeader
+                          active={sortField === "date"}
+                          direction={sortDirection}
+                          icon={Calendar}
+                          label="Fecha"
+                          onClick={() => handleSortChange("date")}
+                        />
                       </th>
                       <th className="px-5 py-4 text-[12px] font-semibold tracking-[0.04em] text-[var(--text-secondary)]">
-                        <div className="flex items-center gap-2">
-                          <Building2 className="h-[13px] w-[13px]" />
-                          Negocio
-                          <ArrowUpDown className="h-3 w-3" />
-                        </div>
+                        <SortableHeader
+                          active={sortField === "businessName"}
+                          direction={sortDirection}
+                          icon={Building2}
+                          label="Negocio"
+                          onClick={() => handleSortChange("businessName")}
+                        />
                       </th>
                       <th className="w-[180px] px-5 py-4 text-[12px] font-semibold tracking-[0.04em] text-[var(--text-secondary)]">
-                        <div className="flex items-center gap-2">
-                          <Tag className="h-[13px] w-[13px]" />
-                          Categoría
-                          <ArrowUpDown className="h-3 w-3" />
-                        </div>
+                        <SortableHeader
+                          active={sortField === "category"}
+                          direction={sortDirection}
+                          icon={Tag}
+                          label="Categoría"
+                          onClick={() => handleSortChange("category")}
+                        />
                       </th>
                       <th className="w-[150px] px-5 py-4 text-right text-[12px] font-semibold tracking-[0.04em] text-[var(--text-secondary)]">
-                        <div className="flex items-center justify-end gap-2">
-                          Importe
-                          <ArrowUpDown className="h-3 w-3" />
-                        </div>
+                        <SortableHeader
+                          active={sortField === "amount"}
+                          align="right"
+                          direction={sortDirection}
+                          label="Importe"
+                          onClick={() => handleSortChange("amount")}
+                        />
                       </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {paginatedPayments.map((entry) => (
+                    {isInitialPaymentsLoad ? (
+                      <tr>
+                        <td
+                          className="border-t border-[var(--border-color)] px-5 py-10 text-center text-[13px] font-medium text-[var(--text-secondary)]"
+                          colSpan={4}
+                        >
+                          Cargando pagos...
+                        </td>
+                      </tr>
+                    ) : payments.length === 0 ? (
+                      <tr>
+                        <td
+                          className="border-t border-[var(--border-color)] px-5 py-10 text-center text-[13px] font-medium text-[var(--text-secondary)]"
+                          colSpan={4}
+                        >
+                          No hay pagos para el rango seleccionado.
+                        </td>
+                      </tr>
+                    ) : (
+                      payments.map((entry) => (
                       <tr key={entry.id}>
                         <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle text-[13px] text-[var(--text-primary)]">
                           {entry.displayDate}
                         </td>
                         <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
-                          <div className="flex flex-col gap-1">
+                          <div className="flex flex-col justify-center gap-1.5">
                             <span className="text-[13px] font-medium text-[var(--text-primary)]">{entry.business}</span>
                             <span className="flex items-center gap-1 text-[12px] text-[var(--text-secondary)]">
                               <FileText className="h-3 w-3 text-[var(--text-muted)]" />
                               {entry.description}
                             </span>
-                            {entry.statusLabel ? (
-                              <span className="inline-flex w-fit items-center gap-1 rounded-full bg-[var(--cat-restaurant-bg)] px-2 py-1 text-[11px] font-semibold text-[var(--cat-restaurant)]">
-                                <CircleAlert className="h-3 w-3" />
-                                {entry.statusLabel}
-                              </span>
-                            ) : null}
+                            {entry.statusLabel ? <ReviewStatusBadge label={entry.statusLabel} /> : null}
                           </div>
                         </td>
                         <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
@@ -604,34 +1040,54 @@ export function PaymentsHistoryScreen() {
                           {formatSignedAmount(entry.amount, entry.direction)}
                         </td>
                       </tr>
-                    ))}
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
               <div className="grid gap-3 p-3 lg:hidden">
-                {paginatedPayments.map((entry) => (
-                  <MobilePaymentCard
-                    amount={entry.amount}
-                    business={entry.business}
-                    category={entry.category}
-                    categoryTone={entry.categoryTone}
-                    description={entry.description}
-                    direction={entry.direction}
-                    displayDate={entry.displayDate}
-                    key={entry.id}
-                    statusLabel={entry.statusLabel}
-                  />
-                ))}
+                {isInitialPaymentsLoad ? (
+                  <div className="rounded-[18px] border border-[var(--border-color)] bg-[var(--bg-white)] p-4 text-center text-[13px] font-medium text-[var(--text-secondary)]">
+                    Cargando pagos...
+                  </div>
+                ) : payments.length === 0 ? (
+                  <div className="rounded-[18px] border border-[var(--border-color)] bg-[var(--bg-white)] p-4 text-center text-[13px] font-medium text-[var(--text-secondary)]">
+                    No hay pagos para el rango seleccionado.
+                  </div>
+                ) : (
+                  payments.map((entry) => (
+                    <MobilePaymentCard
+                      amount={entry.amount}
+                      business={entry.business}
+                      category={entry.category}
+                      categoryTone={entry.categoryTone}
+                      description={entry.description}
+                      direction={entry.direction}
+                      displayDate={entry.displayDate}
+                      key={entry.id}
+                      statusLabel={entry.statusLabel}
+                    />
+                  ))
+                )}
               </div>
               <div className="flex flex-col gap-3 border-t border-[var(--border-color)] px-4 py-4 text-[12px] font-medium text-[var(--text-secondary)] sm:flex-row sm:items-center sm:justify-between sm:px-5">
                 <span>
-                  Mostrando {filteredPayments.length === 0 ? 0 : pageStart + 1}-{Math.min(pageStart + rowsPerPage, filteredPayments.length)} de{" "}
-                  {filteredPayments.length} pagos
+                  Mostrando {totalItems === 0 ? 0 : pageStart + 1}-{Math.min(pageStart + payments.length, totalItems)} de {totalItems} pagos
                 </span>
                 <div className="flex flex-wrap items-center gap-3">
-                  <span className="rounded-[6px] border border-[var(--border-color)] bg-[var(--bg-white)] px-3 py-2 text-[12px] font-medium text-[var(--text-primary)]">
-                    Página {safePage} de {totalPages}
-                  </span>
+                  <CompactSelectField
+                    className="min-w-[152px]"
+                    label="Página actual"
+                    onChange={handlePageChange}
+                    options={pageSelectOptions}
+                    value={safePage}
+                  />
+                  <CompactSelectField
+                    label="Pagos por página"
+                    onChange={handleRowsPerPageChange}
+                    options={rowsPerPageSelectOptions}
+                    value={rowsPerPage}
+                  />
                   <button
                     aria-label="Página anterior"
                     className="flex h-9 w-9 items-center justify-center rounded-[6px] border border-[var(--border-color)] bg-[var(--bg-white)] text-[var(--text-secondary)] disabled:opacity-40"
@@ -658,7 +1114,7 @@ export function PaymentsHistoryScreen() {
                 <div className="space-y-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-[22px] font-bold tracking-[-0.03em] text-[var(--text-primary)]">
+                      <p className="text-[18px] font-bold tracking-[-0.03em] text-[var(--text-primary)]">
                         {mortgageSummary.amountLabel}
                       </p>
                       <p className="mt-1 text-[12px] text-[var(--text-secondary)]">{mortgageSummary.meta}</p>

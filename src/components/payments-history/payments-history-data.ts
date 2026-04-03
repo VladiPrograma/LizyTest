@@ -16,8 +16,8 @@ export type PaymentEntry = {
   categoryTone: PaymentCategoryTone;
   amount: number;
   direction: PaymentDirection;
-  periodMonth: "Abril" | "Marzo";
-  periodYear: "2026";
+  periodMonth: string;
+  periodYear: string;
   statusLabel?: string;
 };
 
@@ -147,7 +147,7 @@ export const paymentEntries: PaymentEntry[] = [
 
 export const yearOptions = ["2026"] as const;
 export const monthOptions = ["Abril", "Marzo"] as const;
-export const rowsPerPageOptions = [6, 10] as const;
+export const rowsPerPageOptions = [6, 12, 24, 50] as const;
 
 export const sidebarSections = [
   {

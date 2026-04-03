@@ -4,10 +4,13 @@ import Image from "next/image";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  CalendarDays,
+  Coins,
   Eye,
   EyeOff,
   LockKeyhole,
   Mail,
+  MapPinned,
   UserRound,
 } from "lucide-react";
 import {
@@ -20,6 +23,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/components/providers/auth-provider";
 import { DASHBOARD_HOME_PATH } from "@/lib/routes";
+import {
+  type CreateUserPayload,
+  UserServiceError,
+  userService,
+} from "@/services/user.service";
 import { cn } from "@/lib/utils";
 
 type AuthMode = "login" | "register";
@@ -35,12 +43,76 @@ type FeedbackState = {
   message: string;
 };
 
+type OnboardingState = CreateUserPayload;
+
 const navigationItems = ["Who we are", "Services", "Blog"];
 
 const initialFormState: FormState = {
   firstName: "",
   email: "",
   password: "",
+};
+
+const regionCurrencyMap: Record<string, string> = {
+  AR: "ARS",
+  BR: "BRL",
+  CL: "CLP",
+  CO: "COP",
+  DE: "EUR",
+  ES: "EUR",
+  FR: "EUR",
+  GB: "GBP",
+  IT: "EUR",
+  MX: "MXN",
+  PT: "EUR",
+  US: "USD",
+};
+
+const getRegionFromLocale = (locale: string) => {
+  const match = locale.match(/-([A-Z]{2})$/i);
+
+  return match ? match[1].toUpperCase() : "";
+};
+
+const getCountryFromLocale = (locale: string) => {
+  const region = getRegionFromLocale(locale);
+
+  if (!region || typeof Intl.DisplayNames === "undefined") {
+    return "";
+  }
+
+  try {
+    const displayNames = new Intl.DisplayNames([locale], { type: "region" });
+    return displayNames.of(region) || "";
+  } catch {
+    return "";
+  }
+};
+
+const getInitialOnboardingState = (): OnboardingState => {
+  if (typeof window === "undefined") {
+    return {
+      birthDate: "",
+      city: "",
+      country: "",
+      currency: "",
+      locale: "en-US",
+      timeZone: "UTC",
+    };
+  }
+
+  const locale = window.navigator.language || "en-US";
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const region = getRegionFromLocale(locale);
+
+  return {
+    birthDate: "",
+    city: "",
+    country: getCountryFromLocale(locale),
+    currency: regionCurrencyMap[region] || "",
+    locale,
+    timeZone,
+  };
 };
 
 const firebaseErrorMessages: Record<string, string> = {
@@ -80,6 +152,18 @@ const normalizeFirebaseMessage = (error: unknown) => {
     .trim();
 };
 
+const normalizeUserServiceMessage = (error: unknown) => {
+  if (error instanceof UserServiceError) {
+    return error.problem?.detail || error.message;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "The user profile request could not be completed.";
+};
+
 function InputShell({
   icon,
   type = "text",
@@ -87,6 +171,7 @@ function InputShell({
   value,
   onChange,
   rightAdornment,
+  disabled = false,
 }: {
   icon: React.ReactNode;
   type?: string;
@@ -94,12 +179,14 @@ function InputShell({
   value: string;
   onChange: (value: string) => void;
   rightAdornment?: React.ReactNode;
+  disabled?: boolean;
 }) {
   return (
     <label className="flex h-[48px] items-center rounded-[16px] border border-[var(--neutral-500)] bg-[var(--white)] px-4 text-[var(--neutral-600)] shadow-[0_2px_10px_var(--black-alpha-03)]">
       <span className="mr-3 flex shrink-0 items-center text-[var(--neutral-600)]">{icon}</span>
       <input
         className="w-full border-none bg-transparent text-[16px] font-medium text-[var(--neutral-800)] outline-none placeholder:text-[var(--neutral-600)]"
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         type={type}
@@ -111,13 +198,19 @@ function InputShell({
 }
 
 export function AuthScreen() {
-  const { isAuthenticated, isLoading, login, register, sendPasswordReset, signInWithGoogle } = useAuth();
+  const { isLoading, login, register, sendPasswordReset, signInWithGoogle, user } = useAuth();
   const [mode, setMode] = useState<AuthMode>("login");
   const [form, setForm] = useState<FormState>(initialFormState);
+  const [onboardingForm, setOnboardingForm] = useState<OnboardingState>(getInitialOnboardingState);
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  const [isResolvingUser, setIsResolvingUser] = useState(false);
+  const [isSavingOnboarding, setIsSavingOnboarding] = useState(false);
+  const [resolvedUserUid, setResolvedUserUid] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
   const [resetFeedback, setResetFeedback] = useState<string | null>(null);
+  const [onboardingFeedback, setOnboardingFeedback] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<FeedbackState>({
     tone: "idle",
     message: "",
@@ -126,14 +219,81 @@ export function AuthScreen() {
   const router = useRouter();
 
   useEffect(() => {
-    if (!isLoading && isAuthenticated) {
-      router.replace(DASHBOARD_HOME_PATH);
+    if (isLoading) {
+      return;
     }
-  }, [isAuthenticated, isLoading, router]);
+
+    if (!user) {
+      setResolvedUserUid(null);
+      setIsOnboardingOpen(false);
+      setOnboardingFeedback(null);
+      setIsResolvingUser(false);
+      return;
+    }
+
+    if (resolvedUserUid === user.uid) {
+      return;
+    }
+
+    let cancelled = false;
+
+    setIsResolvingUser(true);
+    setFeedback({ tone: "idle", message: "" });
+
+    void (async () => {
+      try {
+        const existingUser = await userService.findMe();
+
+        if (cancelled) {
+          return;
+        }
+
+        setResolvedUserUid(user.uid);
+
+        if (existingUser) {
+          router.replace(DASHBOARD_HOME_PATH);
+          return;
+        }
+
+        setOnboardingForm((current) => ({
+          ...getInitialOnboardingState(),
+          birthDate: current.birthDate,
+          city: current.city,
+          country: current.country || getInitialOnboardingState().country,
+          currency: current.currency || getInitialOnboardingState().currency,
+        }));
+        setOnboardingFeedback(null);
+        setIsOnboardingOpen(true);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setFeedback({
+          tone: "error",
+          message: normalizeUserServiceMessage(error),
+        });
+      } finally {
+        if (!cancelled) {
+          setIsResolvingUser(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoading, resolvedUserUid, router, user]);
 
   const updateField = (field: keyof FormState, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
   };
+
+  const updateOnboardingField = (field: keyof OnboardingState, value: string) => {
+    setOnboardingForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const isAuthFlowBusy = isPending || isResolvingUser || isSavingOnboarding;
 
   const handleForgotPasswordOpen = () => {
     setResetEmail(form.email);
@@ -154,7 +314,6 @@ export function AuthScreen() {
             displayName: form.firstName || undefined,
             persistence: "local",
           });
-          router.replace(DASHBOARD_HOME_PATH);
           return;
         }
 
@@ -163,7 +322,6 @@ export function AuthScreen() {
           password: form.password,
           persistence: "local",
         });
-        router.replace(DASHBOARD_HOME_PATH);
       } catch (error) {
         setFeedback({ tone: "error", message: normalizeFirebaseMessage(error) });
       }
@@ -199,11 +357,26 @@ export function AuthScreen() {
     startTransition(async () => {
       try {
         await signInWithGoogle("local");
-        router.replace(DASHBOARD_HOME_PATH);
       } catch (error) {
         setFeedback({ tone: "error", message: normalizeFirebaseMessage(error) });
       }
     });
+  };
+
+  const handleOnboardingSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setOnboardingFeedback(null);
+    setIsSavingOnboarding(true);
+
+    try {
+      await userService.createUser(onboardingForm);
+      setIsOnboardingOpen(false);
+      router.replace(DASHBOARD_HOME_PATH);
+    } catch (error) {
+      setOnboardingFeedback(normalizeUserServiceMessage(error));
+    } finally {
+      setIsSavingOnboarding(false);
+    }
   };
 
   return (
@@ -274,6 +447,7 @@ export function AuthScreen() {
                     )}
                   >
                     <InputShell
+                      disabled={isAuthFlowBusy}
                       icon={<UserRound className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                       onChange={(value) => updateField("firstName", value)}
                       placeholder="First Name"
@@ -282,6 +456,7 @@ export function AuthScreen() {
                   </div>
                 </div>
                 <InputShell
+                  disabled={isAuthFlowBusy}
                   icon={<Mail className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                   onChange={(value) => updateField("email", value)}
                   placeholder="Email"
@@ -290,6 +465,7 @@ export function AuthScreen() {
                 />
                 <div className="mt-4">
                   <InputShell
+                    disabled={isAuthFlowBusy}
                     icon={<LockKeyhole className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                     onChange={(value) => updateField("password", value)}
                     placeholder="Password"
@@ -297,6 +473,7 @@ export function AuthScreen() {
                       <button
                         aria-label={showPassword ? "Hide password" : "Show password"}
                         className="cursor-pointer border-none bg-transparent p-0 text-[var(--neutral-700)]"
+                        disabled={isAuthFlowBusy}
                         onClick={(event) => {
                           event.preventDefault();
                           setShowPassword((current) => !current);
@@ -318,6 +495,7 @@ export function AuthScreen() {
                 <div className="flex justify-end pr-2 pt-1">
                   <button
                     className="border-none bg-transparent text-[14px] font-semibold text-[var(--blue-600)]"
+                    disabled={isAuthFlowBusy}
                     onClick={handleForgotPasswordOpen}
                     type="button"
                   >
@@ -327,10 +505,10 @@ export function AuthScreen() {
 
                 <Button
                   className="mt-7 h-[48px] w-full rounded-[16px] bg-[var(--neutral-900)] text-[20px] font-medium text-[var(--white)] hover:bg-[var(--neutral-950)]"
-                  disabled={isPending}
+                  disabled={isAuthFlowBusy}
                   type="submit"
                 >
-                  {mode === "register" ? "Create account" : "Login"}
+                  {isResolvingUser ? "Checking account..." : mode === "register" ? "Create account" : "Login"}
                 </Button>
 
                 <p
@@ -348,6 +526,7 @@ export function AuthScreen() {
                   {mode === "register" ? "Already have an account? " : "Don't have an account? "}
                   <button
                     className="border-none bg-transparent p-0 font-semibold text-[var(--blue-600)]"
+                    disabled={isAuthFlowBusy}
                     onClick={() => {
                       setFeedback({ tone: "idle", message: "" });
                       setMode((current) => (current === "login" ? "register" : "login"));
@@ -368,7 +547,7 @@ export function AuthScreen() {
 
                 <button
                   className="mt-3 flex h-[46px] w-full items-center justify-center gap-3 rounded-[16px] border border-[var(--neutral-500)] bg-[var(--white)] text-[17px] font-medium text-[var(--neutral-800)] shadow-[0_4px_16px_var(--black-alpha-04)]"
-                  disabled={isPending}
+                  disabled={isAuthFlowBusy}
                   onClick={handleGoogleSignIn}
                   type="button"
                 >
@@ -386,6 +565,75 @@ export function AuthScreen() {
           </div>
         </section>
       </div>
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (open) {
+            setIsOnboardingOpen(true);
+          }
+        }}
+        open={isOnboardingOpen}
+      >
+        <DialogContent className="max-w-[520px] rounded-[28px] border border-[var(--sand-200)] bg-[var(--white)] p-8 text-[var(--sand-950)] shadow-[0_30px_90px_var(--navy-alpha-24)]">
+          <DialogHeader className="space-y-2 text-left">
+            <DialogTitle className="text-[28px] font-semibold tracking-[-0.03em] text-[var(--neutral-950)]">
+              Complete your profile
+            </DialogTitle>
+            <DialogDescription className="text-[15px] leading-6 text-[var(--sand-600)]">
+              Your Firebase account exists, but we still need the onboarding data required by the backend before entering the app.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form className="mt-4 flex flex-col gap-4" onSubmit={handleOnboardingSubmit}>
+            <div className="grid grid-cols-2 gap-4">
+              <InputShell
+                disabled={isSavingOnboarding}
+                icon={<MapPinned className="h-[18px] w-[18px]" strokeWidth={2.1} />}
+                onChange={(value) => updateOnboardingField("country", value)}
+                placeholder="Country"
+                value={onboardingForm.country}
+              />
+              <InputShell
+                disabled={isSavingOnboarding}
+                icon={<MapPinned className="h-[18px] w-[18px]" strokeWidth={2.1} />}
+                onChange={(value) => updateOnboardingField("city", value)}
+                placeholder="City"
+                value={onboardingForm.city}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <InputShell
+                disabled={isSavingOnboarding}
+                icon={<Coins className="h-[18px] w-[18px]" strokeWidth={2.1} />}
+                onChange={(value) => updateOnboardingField("currency", value.toUpperCase())}
+                placeholder="Currency (EUR)"
+                value={onboardingForm.currency}
+              />
+              <InputShell
+                disabled={isSavingOnboarding}
+                icon={<CalendarDays className="h-[18px] w-[18px]" strokeWidth={2.1} />}
+                onChange={(value) => updateOnboardingField("birthDate", value)}
+                placeholder="Birth date"
+                type="date"
+                value={onboardingForm.birthDate}
+              />
+            </div>
+
+            <p className={cn("min-h-6 text-left text-[14px] font-medium", onboardingFeedback ? "text-[var(--danger-red)]" : "text-transparent")}>
+              {onboardingFeedback || "."}
+            </p>
+
+            <Button
+              className="h-[48px] w-full rounded-[16px] bg-[var(--neutral-900)] text-[18px] font-medium text-[var(--white)] hover:bg-[var(--neutral-950)]"
+              disabled={isSavingOnboarding}
+              type="submit"
+            >
+              {isSavingOnboarding ? "Saving profile..." : "Continue"}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         onOpenChange={(open) => {
