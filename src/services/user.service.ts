@@ -1,10 +1,7 @@
 "use client";
 
-import { authService } from "@/services/auth.service";
+import { bfClient, type ProblemDetails } from "@/services/bf-client";
 
-const DEFAULT_API_BASE_URL = "https://back.vladicode.com";
-const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_BASE_URL?.trim() || DEFAULT_API_BASE_URL;
-const USER_ENDPOINT = `${API_BASE_URL}/user`;
 const CURRENCY_PATTERN = /^[A-Z]{3}$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -45,15 +42,6 @@ export type UpdateUserPayload = {
   profilePhotoUrl?: string;
 };
 
-export type ProblemDetails = {
-  title?: string;
-  status?: number;
-  detail?: string;
-  instance?: string;
-  timestamp?: string;
-  path?: string;
-};
-
 export class UserServiceError extends Error {
   readonly status: number;
   readonly problem: ProblemDetails | null;
@@ -65,14 +53,6 @@ export class UserServiceError extends Error {
     this.problem = problem;
   }
 }
-
-const isProblemDetails = (value: unknown): value is ProblemDetails => {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  return "title" in value || "status" in value || "detail" in value || "path" in value;
-};
 
 const parseDateParts = (value: string) => {
   if (!DATE_PATTERN.test(value)) {
@@ -170,56 +150,16 @@ const sanitizeUpdatePayload = (payload: UpdateUserPayload) => {
   return sanitized;
 };
 
-const parseProblemResponse = async (response: Response) => {
-  const contentType = response.headers.get("content-type") || "";
-
-  if (contentType.includes("application/json")) {
-    const body = await response.json().catch(() => null);
-
-    if (isProblemDetails(body)) {
-      return body;
-    }
-  }
-
-  const detail = await response.text().catch(() => "");
-
-  if (!detail) {
-    return null;
-  }
-
-  return {
-    detail,
-    status: response.status,
-    title: response.statusText,
-  } satisfies ProblemDetails;
-};
-
-const getErrorMessage = (problem: ProblemDetails | null, response: Response) => {
-  return problem?.detail || problem?.title || response.statusText || "Request failed.";
-};
-
 class UserService {
   private async request<T>(path: string, init?: RequestInit) {
-    const token = await authService.getIdToken();
-    const response = await fetch(`${USER_ENDPOINT}${path}`, {
-      ...init,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(init?.body ? { "Content-Type": "application/json" } : {}),
-        ...init?.headers,
-      },
+    return bfClient.request<T>({
+      body: init?.body,
+      contentType: init?.body ? "application/json" : undefined,
+      errorFactory: (message, status, problem) => new UserServiceError(message, status, problem),
+      headers: init?.headers,
+      method: init?.method,
+      path: `/user${path}`,
     });
-
-    if (!response.ok) {
-      const problem = await parseProblemResponse(response);
-      throw new UserServiceError(getErrorMessage(problem, response), response.status, problem);
-    }
-
-    if (response.status === 204) {
-      return undefined as T;
-    }
-
-    return (await response.json()) as T;
   }
 
   async getMe() {

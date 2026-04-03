@@ -119,27 +119,17 @@
   --white: #ffffff;
 
   --aquamarine-500: #44ffd1;
-  --aquamarine-50: #44ffd1;
-
+  --aquamarine-50: #f2fffc;
   --blue-sky-500: #00bbf9;
-  --blue-sky-50: #00bbf9;
-
+  --blue-sky-50: #f1fbff;
   --light-green-500: #6EEB83;
-  --light-green-50: #6EEB83;
-
+  --light-green-50: #f3fff5;
   --jazmine-500: #FFE381;
-  --jazmine-50: #FFE381;
-
+  --jazmine-50: #fffbf3;
   --lime-500: #DBFE87;
-  --lime-50: #DBFE87;
-
-
-
-
-
-
-
-
+  --lime-50: #fcfdf1;
+  --gray-500: #111111;
+  --gray-50: #cfcfcf;
 
   /* Semantic aliases */
   --background: var(--white);
@@ -154,20 +144,35 @@
   --cat-housing: var(--indigo-500);
 
 
+  --cat-unknown: var(--gray-500);
+  --cat-unknown-bg: var(--gray-50);
+
   --cat-office: var(--teal-500);
   --cat-office-bg: var(--teal-50);
 
   --cat-restaurant: var(--orange-500);
   --cat-restaurant-bg: var(--orange-50);
 
-  --cat-services: var(--violet-500);
-  --cat-services-bg: var(--violet-50);
+  --cat-stonks: var(--violet-500);
+  --cat-stonks-bg: var(--violet-50);
 
   --cat-software: var(--pink-500);
   --cat-software-bg: var(--pink-50);
 
   --cat-transport: var(--cyan-500);
   --cat-transport-bg: var(--cyan-50);
+
+  --cat-care: var(--aquamarine-500);
+  --cat-care-bg: var(--aquamarine-50);
+
+  --cat-sports: var(--blue-sky-500);
+  --cat-sports-bg: var(--blue-sky-50);
+
+  --cat-home: var(--jazmine-500);
+  --cat-home-bg: var(--jazmine-50);
+
+  --cat-entertainment: var(--lime-500);
+  --cat-entertainment-bg: var(--lime-50);
 
 
 

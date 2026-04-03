@@ -8,12 +8,12 @@ import {
   ArrowDown,
   ArrowRight,
   ArrowUpDown,
+  BadgeEuro,
   Building2,
   Calendar,
   CalendarCheck,
   CalendarDays,
   CalendarRange,
-  CalendarSearch,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
@@ -37,7 +37,13 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { Button } from "@/components/ui/button";
-import { CompactSelectField, DateField, SelectField, type SelectFieldOption } from "@/components/ui/select-field";
+import {
+  AmountRangeField,
+  CompactSelectField,
+  DateField,
+  SelectField,
+  type SelectFieldOption,
+} from "@/components/ui/select-field";
 import {
   fixedExpenses,
   mortgageSummary,
@@ -72,8 +78,8 @@ const categoryToneClasses: Record<PaymentCategoryTone, { badge: string; dot: str
     dot: "bg-[var(--cat-restaurant)]",
   },
   services: {
-    badge: "bg-[var(--cat-services-bg)] text-[var(--cat-services)]",
-    dot: "bg-[var(--cat-services)]",
+    badge: "bg-[var(--cat-stonks-bg)] text-[var(--cat-stonks)]",
+    dot: "bg-[var(--cat-stonks)]",
   },
   software: {
     badge: "bg-[var(--cat-software-bg)] text-[var(--cat-software)]",
@@ -93,7 +99,7 @@ const fixedExpenseIconMap: Record<string, LucideIcon> = {
 
 const fixedExpenseToneClasses: Record<string, string> = {
   housing: "text-[var(--cat-housing)]",
-  services: "text-[var(--cat-services)]",
+  services: "text-[var(--cat-stonks)]",
   software: "text-[var(--cat-software)]",
 };
 
@@ -250,6 +256,10 @@ function buildDateRange(
   };
 }
 
+function getPaymentTypeLabel(type: "ADD" | "SUBTRACT") {
+  return type === "ADD" ? "Importe" : "Pago";
+}
+
 function mapPaymentToEntry(payment: PaymentDto): PaymentEntry {
   const categoryTone = getCategoryToneFromPayment(payment);
 
@@ -262,6 +272,7 @@ function mapPaymentToEntry(payment: PaymentDto): PaymentEntry {
     direction: payment.type === "ADD" ? "incoming" : "outgoing",
     displayDate: toDisplayDate(payment.date),
     id: payment.id,
+    paymentTypeLabel: getPaymentTypeLabel(payment.type),
     periodMonth: toPeriodMonth(payment.date),
     periodYear: payment.date.slice(0, 4),
     statusLabel: payment.needsReview ? "Pendiente de procesar" : undefined,
@@ -330,6 +341,27 @@ function PaymentCategoryBadge({
       )}
     >
       <span className={cn("h-[7px] w-[7px] rounded-full", categoryToneClasses[tone].dot)} />
+      {label}
+    </span>
+  );
+}
+
+function PaymentTypeBadge({
+  direction,
+  label,
+}: {
+  direction: "incoming" | "outgoing";
+  label: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-[26px] items-center rounded-full px-2.5 text-[12px] font-medium",
+        direction === "incoming"
+          ? "bg-[var(--success-green)]/10 text-[var(--success-green)]"
+          : "bg-[var(--danger-red)]/10 text-[var(--danger-red)]",
+      )}
+    >
       {label}
     </span>
   );
@@ -416,6 +448,7 @@ function MobilePaymentCard({
   description,
   displayDate,
   direction,
+  paymentTypeLabel,
   statusLabel,
 }: {
   amount: number;
@@ -425,6 +458,7 @@ function MobilePaymentCard({
   description: string;
   displayDate: string;
   direction: "incoming" | "outgoing";
+  paymentTypeLabel?: string;
   statusLabel?: string;
 }) {
   return (
@@ -449,6 +483,7 @@ function MobilePaymentCard({
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <PaymentCategoryBadge label={category} tone={categoryTone} />
+        <PaymentTypeBadge direction={direction} label={paymentTypeLabel ?? getPaymentTypeLabel(direction === "incoming" ? "ADD" : "SUBTRACT")} />
         {statusLabel ? <ReviewStatusBadge label={statusLabel} /> : null}
       </div>
     </article>
@@ -478,6 +513,8 @@ export function PaymentsHistoryScreen() {
   const [customEndDate, setCustomEndDate] = useState(defaultCustomDateRange.endDate);
   const [selectedCategory, setSelectedCategory] = useState(ALL_CATEGORIES_LABEL);
   const [selectedBusiness, setSelectedBusiness] = useState(ALL_BUSINESSES_LABEL);
+  const [minAmount, setMinAmount] = useState("");
+  const [maxAmount, setMaxAmount] = useState("");
   const [sortField, setSortField] = useState<PaymentSortField>("date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("DESC");
   const [rowsPerPage, setRowsPerPage] = useState<(typeof rowsPerPageOptions)[number]>(6);
@@ -567,6 +604,22 @@ export function PaymentsHistoryScreen() {
     const { endDate, startDate } = dateRange;
     const categoryFilter = selectedCategory === ALL_CATEGORIES_LABEL ? undefined : selectedCategory;
     const businessFilter = selectedBusiness === ALL_BUSINESSES_LABEL ? undefined : selectedBusiness;
+    const parsedMinAmount = minAmount ? Number(minAmount) : undefined;
+    const parsedMaxAmount = maxAmount ? Number(maxAmount) : undefined;
+
+    if (
+      (parsedMinAmount !== undefined && (Number.isNaN(parsedMinAmount) || parsedMinAmount < 0)) ||
+      (parsedMaxAmount !== undefined && (Number.isNaN(parsedMaxAmount) || parsedMaxAmount < 0))
+    ) {
+      setPaymentsError("El rango de importe debe contener valores válidos mayores o iguales a 0.");
+      return;
+    }
+
+    if (parsedMinAmount !== undefined && parsedMaxAmount !== undefined && parsedMinAmount > parsedMaxAmount) {
+      setPaymentsError("El importe mínimo no puede ser mayor que el importe máximo.");
+      return;
+    }
+
     let cancelled = false;
 
     const loadPayments = async () => {
@@ -580,6 +633,8 @@ export function PaymentsHistoryScreen() {
             category: categoryFilter,
             direction: sortDirection,
             endDate,
+            maxAmount: parsedMaxAmount,
+            minAmount: parsedMinAmount,
             page: currentPage - 1,
             size: rowsPerPage,
             sort: sortField,
@@ -633,6 +688,8 @@ export function PaymentsHistoryScreen() {
     currentPage,
     isAuthenticated,
     isLoading,
+    maxAmount,
+    minAmount,
     period,
     reloadKey,
     rowsPerPage,
@@ -679,6 +736,12 @@ export function PaymentsHistoryScreen() {
 
   const handleBusinessChange = (value: string) => {
     setSelectedBusiness(value);
+    setCurrentPage(1);
+  };
+
+  const handleAmountRangeChange = ({ minValue, maxValue }: { minValue: string; maxValue: string }) => {
+    setMinAmount(minValue);
+    setMaxAmount(maxValue);
     setCurrentPage(1);
   };
 
@@ -907,11 +970,7 @@ export function PaymentsHistoryScreen() {
               </div>
               <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                 <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
-                  <div className="flex items-center gap-2 text-[13px] font-medium text-[var(--text-secondary)]">
-                    <Tag className="h-4 w-4 text-[var(--text-secondary)]" />
-                    <span>Filtros:</span>
-                  </div>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
                     <SelectField
                       icon={Tag}
                       label="Categoría"
@@ -925,6 +984,13 @@ export function PaymentsHistoryScreen() {
                       onChange={handleBusinessChange}
                       options={businessSelectOptions}
                       value={selectedBusiness}
+                    />
+                    <AmountRangeField
+                      icon={BadgeEuro}
+                      label="Importe"
+                      maxValue={maxAmount}
+                      minValue={minAmount}
+                      onChange={handleAmountRangeChange}
                     />
                   </div>
                 </div>
@@ -950,7 +1016,7 @@ export function PaymentsHistoryScreen() {
                 </div>
               ) : null}
               <div className="hidden overflow-x-auto lg:block">
-                <table className="w-full min-w-[980px] border-separate border-spacing-0">
+                <table className="w-full min-w-[1100px] border-separate border-spacing-0">
                   <thead className="bg-[var(--bg-light)] text-left">
                     <tr>
                       <th className="w-[140px] px-5 py-4 text-[12px] font-semibold tracking-[0.04em] text-[var(--accent-blue)]">
@@ -980,11 +1046,21 @@ export function PaymentsHistoryScreen() {
                           onClick={() => handleSortChange("category")}
                         />
                       </th>
+                      <th className="w-[130px] px-5 py-4 text-[12px] font-semibold tracking-[0.04em] text-[var(--text-secondary)]">
+                        <SortableHeader
+                          active={sortField === "type"}
+                          direction={sortDirection}
+                          icon={Repeat2}
+                          label="Tipo"
+                          onClick={() => handleSortChange("type")}
+                        />
+                      </th>
                       <th className="w-[150px] px-5 py-4 text-right text-[12px] font-semibold tracking-[0.04em] text-[var(--text-secondary)]">
                         <SortableHeader
                           active={sortField === "amount"}
                           align="right"
                           direction={sortDirection}
+                          icon={BadgeEuro}
                           label="Importe"
                           onClick={() => handleSortChange("amount")}
                         />
@@ -996,7 +1072,7 @@ export function PaymentsHistoryScreen() {
                       <tr>
                         <td
                           className="border-t border-[var(--border-color)] px-5 py-10 text-center text-[13px] font-medium text-[var(--text-secondary)]"
-                          colSpan={4}
+                          colSpan={5}
                         >
                           Cargando pagos...
                         </td>
@@ -1005,7 +1081,7 @@ export function PaymentsHistoryScreen() {
                       <tr>
                         <td
                           className="border-t border-[var(--border-color)] px-5 py-10 text-center text-[13px] font-medium text-[var(--text-secondary)]"
-                          colSpan={4}
+                          colSpan={5}
                         >
                           No hay pagos para el rango seleccionado.
                         </td>
@@ -1028,6 +1104,12 @@ export function PaymentsHistoryScreen() {
                         </td>
                         <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
                           <PaymentCategoryBadge label={entry.category} tone={entry.categoryTone} />
+                        </td>
+                        <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
+                          <PaymentTypeBadge
+                            direction={entry.direction}
+                            label={entry.paymentTypeLabel ?? getPaymentTypeLabel(entry.direction === "incoming" ? "ADD" : "SUBTRACT")}
+                          />
                         </td>
                         <td
                           className={cn(
@@ -1065,6 +1147,7 @@ export function PaymentsHistoryScreen() {
                       direction={entry.direction}
                       displayDate={entry.displayDate}
                       key={entry.id}
+                      paymentTypeLabel={entry.paymentTypeLabel}
                       statusLabel={entry.statusLabel}
                     />
                   ))
@@ -1138,7 +1221,7 @@ export function PaymentsHistoryScreen() {
                   </div>
                 </div>
               </SummaryCard>
-              <SummaryCard icon={Repeat2} iconClassName="text-[var(--cat-services)]" title="Gastos fijos">
+              <SummaryCard icon={Repeat2} iconClassName="text-[var(--cat-stonks)]" title="Gastos fijos">
                 <div className="space-y-4">
                   <div>
                     <p className="text-[22px] font-bold tracking-[-0.03em] text-[var(--text-primary)]">

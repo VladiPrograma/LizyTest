@@ -1,6 +1,14 @@
 "use client";
 
-import { ChevronDown, type LucideIcon } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronLeft, ChevronRight, type LucideIcon } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 export type SelectFieldOption = {
@@ -35,6 +43,143 @@ type DateFieldProps = {
   max?: string;
 };
 
+type InputFieldProps = {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+  type?: "text" | "number";
+  min?: string;
+  max?: string;
+  step?: string;
+  placeholder?: string;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
+};
+
+type AmountRangeFieldProps = {
+  icon: LucideIcon;
+  label: string;
+  minValue: string;
+  maxValue: string;
+  onChange: (nextRange: { minValue: string; maxValue: string }) => void;
+  className?: string;
+};
+
+const dateLabelFormatter = new Intl.DateTimeFormat("es-ES", {
+  day: "numeric",
+  month: "long",
+  timeZone: "UTC",
+  year: "numeric",
+});
+const monthLabelFormatter = new Intl.DateTimeFormat("es-ES", {
+  month: "long",
+  timeZone: "UTC",
+  year: "numeric",
+});
+const weekdayLabels = ["L", "M", "X", "J", "V", "S", "D"];
+
+const parseIsoDate = (value?: string) => {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
+  }
+
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date;
+};
+
+const toIsoDate = (date: Date) => {
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+};
+
+const startOfUtcMonth = (date: Date) => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+const endOfUtcMonth = (date: Date) => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
+const addUtcMonths = (date: Date, months: number) => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1));
+
+const getCalendarOffset = (date: Date) => {
+  const day = date.getUTCDay();
+
+  return day === 0 ? 6 : day - 1;
+};
+
+const isSameUtcDay = (left: Date, right: Date) => {
+  return (
+    left.getUTCFullYear() === right.getUTCFullYear() &&
+    left.getUTCMonth() === right.getUTCMonth() &&
+    left.getUTCDate() === right.getUTCDate()
+  );
+};
+
+const isOutsideRange = (date: Date, minDate: Date | null, maxDate: Date | null) => {
+  if (minDate && date.getTime() < minDate.getTime()) {
+    return true;
+  }
+
+  if (maxDate && date.getTime() > maxDate.getTime()) {
+    return true;
+  }
+
+  return false;
+};
+
+const canNavigateToMonth = (date: Date, minDate: Date | null, maxDate: Date | null) => {
+  const monthStart = startOfUtcMonth(date);
+  const monthEnd = endOfUtcMonth(date);
+
+  if (minDate && monthEnd.getTime() < minDate.getTime()) {
+    return false;
+  }
+
+  if (maxDate && monthStart.getTime() > maxDate.getTime()) {
+    return false;
+  }
+
+  return true;
+};
+
+const getInitialVisibleMonth = (value?: string, min?: string, max?: string) => {
+  const selectedDate = parseIsoDate(value);
+  const minDate = parseIsoDate(min);
+  const maxDate = parseIsoDate(max);
+  const today = new Date();
+  const todayUtc = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+
+  return startOfUtcMonth(selectedDate ?? minDate ?? maxDate ?? todayUtc);
+};
+
+const getOptionLabel = (options: SelectFieldOption[], value: string | number) => {
+  const normalizedValue = String(value);
+
+  return options.find((option) => String(option.value) === normalizedValue)?.label ?? normalizedValue;
+};
+
+const formatAmountLabel = (value: string) => {
+  if (!value) {
+    return null;
+  }
+
+  const amount = Number(value);
+
+  if (Number.isNaN(amount)) {
+    return value;
+  }
+
+  return `${amount.toLocaleString("es-ES", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: amount % 1 === 0 ? 0 : 2,
+  })} EUR`;
+};
+
 export function SelectField({
   icon: Icon,
   label,
@@ -43,30 +188,50 @@ export function SelectField({
   onChange,
   className,
 }: SelectFieldProps) {
+  const selectedLabel = getOptionLabel(options, value);
+
   return (
-    <label className={cn("group flex min-w-0 flex-col gap-1.5", className)}>
+    <div className={cn("group flex min-w-0 flex-col gap-1.5", className)}>
       <span className="pl-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
         {label}
       </span>
-      <div className="relative flex h-12 items-center gap-3 overflow-hidden rounded-[14px] border border-[var(--border-color)] bg-[linear-gradient(180deg,var(--bg-white)_0%,var(--bg-light)_180%)] px-3 shadow-[0_10px_30px_var(--navy-alpha-03)] transition duration-200 hover:border-[var(--blue-200)] focus-within:border-[var(--accent-blue)] focus-within:shadow-[0_0_0_3px_var(--blue-alpha-25)]">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[var(--accent-blue-light)] text-[var(--accent-blue)] ring-1 ring-[var(--blue-100)]">
-          <Icon className="h-4 w-4" />
-        </span>
-        <select
-          aria-label={label}
-          className="h-full min-w-0 flex-1 appearance-none bg-transparent pr-8 text-[14px] font-semibold text-[var(--text-primary)] outline-none"
-          onChange={(event) => onChange(event.target.value)}
-          value={value}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            aria-label={label}
+            className="relative flex h-12 w-full items-center gap-3 overflow-hidden rounded-[14px] border border-[var(--border-color)] bg-[linear-gradient(180deg,var(--bg-white)_0%,var(--bg-light)_180%)] px-3 text-left shadow-[0_10px_30px_var(--navy-alpha-03)] transition duration-200 hover:border-[var(--blue-200)] focus-visible:border-[var(--accent-blue)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_var(--blue-alpha-25)]"
+            type="button"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[var(--accent-blue-light)] text-[var(--accent-blue)] ring-1 ring-[var(--blue-100)]">
+              <Icon className="h-4 w-4" />
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-[var(--text-primary)]">
+              {selectedLabel}
+            </span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-[var(--text-muted)] transition-transform duration-200 data-[state=open]:rotate-180" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[220px] rounded-[16px] border border-[var(--border-color)] bg-[var(--white-alpha-90)] p-1.5 shadow-[0_18px_50px_var(--navy-alpha-20)] backdrop-blur-xl"
+          sideOffset={8}
         >
-          {options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)] transition-transform duration-200 group-focus-within:rotate-180" />
-      </div>
-    </label>
+          <DropdownMenuRadioGroup onValueChange={onChange} value={String(value)}>
+            <div className="max-h-72 overflow-y-auto">
+              {options.map((option) => (
+                <DropdownMenuRadioItem
+                  className="rounded-[12px] px-3 py-2.5 pl-10 text-[14px] font-medium text-[var(--text-primary)] outline-none transition-colors focus:bg-[var(--accent-blue-light)] data-[state=checked]:bg-[var(--accent-blue-light)] data-[state=checked]:text-[var(--accent-blue)]"
+                  key={option.value}
+                  value={String(option.value)}
+                >
+                  {option.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </div>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 }
 
@@ -77,28 +242,43 @@ export function CompactSelectField({
   onChange,
   className,
 }: CompactSelectFieldProps) {
+  const selectedLabel = getOptionLabel(options, value);
+
   return (
-    <label
-      className={cn(
-        "group relative flex h-9 min-w-[124px] items-center rounded-[6px] border border-[var(--border-color)] bg-[var(--bg-white)] px-3 text-[12px] font-medium text-[var(--text-primary)]",
-        className,
-      )}
-    >
-      <span className="sr-only">{label}</span>
-      <select
-        aria-label={label}
-        className="h-full w-full appearance-none bg-transparent pr-5 text-[12px] font-medium text-[var(--text-primary)] outline-none"
-        onChange={(event) => onChange(event.target.value)}
-        value={value}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          aria-label={label}
+          className={cn(
+            "relative flex h-9 min-w-[124px] items-center rounded-[6px] border border-[var(--border-color)] bg-[var(--bg-white)] px-3 text-left text-[12px] font-medium text-[var(--text-primary)] transition duration-200 hover:border-[var(--blue-200)] focus-visible:border-[var(--accent-blue)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_var(--blue-alpha-25)]",
+            className,
+          )}
+          type="button"
+        >
+          <span className="min-w-0 flex-1 truncate pr-5">{selectedLabel}</span>
+          <ChevronDown className="absolute right-3 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--text-muted)]" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[180px] rounded-[12px] border border-[var(--border-color)] bg-[var(--white-alpha-90)] p-1.5 shadow-[0_18px_50px_var(--navy-alpha-20)] backdrop-blur-xl"
+        sideOffset={8}
       >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--text-muted)] transition-transform duration-200 group-focus-within:rotate-180" />
-    </label>
+        <DropdownMenuRadioGroup onValueChange={onChange} value={String(value)}>
+          <div className="max-h-72 overflow-y-auto">
+            {options.map((option) => (
+              <DropdownMenuRadioItem
+                className="rounded-[10px] px-3 py-2 pl-9 text-[12px] font-medium text-[var(--text-primary)] outline-none transition-colors focus:bg-[var(--accent-blue-light)] data-[state=checked]:bg-[var(--accent-blue-light)] data-[state=checked]:text-[var(--accent-blue)]"
+                key={option.value}
+                value={String(option.value)}
+              >
+                {option.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </div>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -111,6 +291,145 @@ export function DateField({
   min,
   max,
 }: DateFieldProps) {
+  const [open, setOpen] = useState(false);
+  const [visibleMonth, setVisibleMonth] = useState(() => getInitialVisibleMonth(value, min, max));
+  const selectedDate = useMemo(() => parseIsoDate(value), [value]);
+  const minDate = useMemo(() => parseIsoDate(min), [min]);
+  const maxDate = useMemo(() => parseIsoDate(max), [max]);
+  const selectedLabel = selectedDate ? dateLabelFormatter.format(selectedDate) : "Selecciona una fecha";
+  const monthLabel = monthLabelFormatter.format(visibleMonth);
+  const previousMonth = addUtcMonths(visibleMonth, -1);
+  const nextMonth = addUtcMonths(visibleMonth, 1);
+  const isPreviousDisabled = !canNavigateToMonth(previousMonth, minDate, maxDate);
+  const isNextDisabled = !canNavigateToMonth(nextMonth, minDate, maxDate);
+  const calendarDays = useMemo(() => {
+    const monthStart = startOfUtcMonth(visibleMonth);
+    const daysInMonth = endOfUtcMonth(visibleMonth).getUTCDate();
+    const offset = getCalendarOffset(monthStart);
+
+    return [
+      ...Array.from({ length: offset }, () => null),
+      ...Array.from({ length: daysInMonth }, (_, index) => new Date(Date.UTC(visibleMonth.getUTCFullYear(), visibleMonth.getUTCMonth(), index + 1))),
+    ];
+  }, [visibleMonth]);
+
+  useEffect(() => {
+    if (open) {
+      setVisibleMonth(getInitialVisibleMonth(value, min, max));
+    }
+  }, [max, min, open, value]);
+
+  return (
+    <div className={cn("group flex min-w-0 flex-col gap-1.5", className)}>
+      <span className="pl-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+        {label}
+      </span>
+      <DropdownMenu onOpenChange={setOpen} open={open}>
+        <DropdownMenuTrigger asChild>
+          <button
+            aria-label={label}
+            className="relative flex h-12 w-full items-center gap-3 overflow-hidden rounded-[14px] border border-[var(--border-color)] bg-[linear-gradient(180deg,var(--bg-white)_0%,var(--bg-light)_180%)] px-3 text-left shadow-[0_10px_30px_var(--navy-alpha-03)] transition duration-200 hover:border-[var(--blue-200)] focus-visible:border-[var(--accent-blue)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_var(--blue-alpha-25)]"
+            type="button"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[var(--accent-blue-light)] text-[var(--accent-blue)] ring-1 ring-[var(--blue-100)]">
+              <Icon className="h-4 w-4" />
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-[var(--text-primary)]">
+              {selectedLabel}
+            </span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="w-[320px] rounded-[18px] border border-[var(--border-color)] bg-[var(--white-alpha-90)] p-3 shadow-[0_24px_60px_var(--navy-alpha-20)] backdrop-blur-xl"
+          sideOffset={8}
+        >
+          <div className="flex items-center justify-between gap-3 pb-3">
+            <button
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border-color)] bg-[var(--bg-white)] text-[var(--text-secondary)] transition-colors hover:border-[var(--blue-200)] hover:text-[var(--accent-blue)] disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={isPreviousDisabled}
+              onClick={() => setVisibleMonth(previousMonth)}
+              type="button"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <div className="text-center">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Calendario</p>
+              <p className="text-[15px] font-semibold capitalize text-[var(--text-primary)]">{monthLabel}</p>
+            </div>
+            <button
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border-color)] bg-[var(--bg-white)] text-[var(--text-secondary)] transition-colors hover:border-[var(--blue-200)] hover:text-[var(--accent-blue)] disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={isNextDisabled}
+              onClick={() => setVisibleMonth(nextMonth)}
+              type="button"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="grid grid-cols-7 gap-1 pb-2">
+            {weekdayLabels.map((dayLabel) => (
+              <span
+                className="flex h-8 items-center justify-center text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]"
+                key={dayLabel}
+              >
+                {dayLabel}
+              </span>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {calendarDays.map((day, index) => {
+              if (!day) {
+                return <span className="h-10" key={`empty-${index}`} />;
+              }
+
+              const isDisabled = isOutsideRange(day, minDate, maxDate);
+              const isSelected = selectedDate ? isSameUtcDay(day, selectedDate) : false;
+              const isToday = isSameUtcDay(day, new Date(Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate())));
+
+              return (
+                <button
+                  className={cn(
+                    "flex h-10 items-center justify-center rounded-[12px] text-[13px] font-semibold transition-colors",
+                    isSelected
+                      ? "bg-[var(--accent-blue)] text-[var(--white)] shadow-[0_10px_18px_var(--blue-alpha-25)]"
+                      : isDisabled
+                        ? "cursor-not-allowed text-[var(--text-muted)] opacity-35"
+                        : "text-[var(--text-primary)] hover:bg-[var(--accent-blue-light)] hover:text-[var(--accent-blue)]",
+                    isToday && !isSelected ? "ring-1 ring-[var(--blue-200)]" : "",
+                  )}
+                  disabled={isDisabled}
+                  key={toIsoDate(day)}
+                  onClick={() => {
+                    onChange(toIsoDate(day));
+                    setOpen(false);
+                  }}
+                  type="button"
+                >
+                  {day.getUTCDate()}
+                </button>
+              );
+            })}
+          </div>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+export function InputField({
+  icon: Icon,
+  label,
+  value,
+  onChange,
+  className,
+  type = "text",
+  min,
+  max,
+  step,
+  placeholder,
+  inputMode,
+}: InputFieldProps) {
   return (
     <label className={cn("group flex min-w-0 flex-col gap-1.5", className)}>
       <span className="pl-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
@@ -122,14 +441,161 @@ export function DateField({
         </span>
         <input
           aria-label={label}
-          className="h-full min-w-0 flex-1 bg-transparent text-[14px] font-semibold text-[var(--text-primary)] outline-none"
+          className="h-full min-w-0 flex-1 bg-transparent text-[14px] font-semibold text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+          inputMode={inputMode}
           max={max}
           min={min}
           onChange={(event) => onChange(event.target.value)}
-          type="date"
+          placeholder={placeholder}
+          step={step}
+          type={type}
           value={value}
         />
       </div>
     </label>
+  );
+}
+
+export function AmountRangeField({
+  icon: Icon,
+  label,
+  minValue,
+  maxValue,
+  onChange,
+  className,
+}: AmountRangeFieldProps) {
+  const [open, setOpen] = useState(false);
+  const [draftMinValue, setDraftMinValue] = useState(minValue);
+  const [draftMaxValue, setDraftMaxValue] = useState(maxValue);
+
+  useEffect(() => {
+    if (open) {
+      setDraftMinValue(minValue);
+      setDraftMaxValue(maxValue);
+    }
+  }, [maxValue, minValue, open]);
+
+  const formattedMinLabel = formatAmountLabel(minValue);
+  const formattedMaxLabel = formatAmountLabel(maxValue);
+  const triggerLabel =
+    formattedMinLabel && formattedMaxLabel
+      ? `${formattedMinLabel} - ${formattedMaxLabel}`
+      : formattedMinLabel
+        ? `Desde ${formattedMinLabel}`
+        : formattedMaxLabel
+          ? `Hasta ${formattedMaxLabel}`
+          : "Todos los importes";
+  const parsedDraftMin = draftMinValue ? Number(draftMinValue) : undefined;
+  const parsedDraftMax = draftMaxValue ? Number(draftMaxValue) : undefined;
+  const hasInvalidDraft =
+    (parsedDraftMin !== undefined && (Number.isNaN(parsedDraftMin) || parsedDraftMin < 0)) ||
+    (parsedDraftMax !== undefined && (Number.isNaN(parsedDraftMax) || parsedDraftMax < 0)) ||
+    (parsedDraftMin !== undefined && parsedDraftMax !== undefined && parsedDraftMin > parsedDraftMax);
+
+  return (
+    <div className={cn("group flex min-w-0 flex-col gap-1.5", className)}>
+      <span className="pl-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+        {label}
+      </span>
+      <DropdownMenu onOpenChange={setOpen} open={open}>
+        <DropdownMenuTrigger asChild>
+          <button
+            aria-label={label}
+            className="relative flex h-12 w-full items-center gap-3 overflow-hidden rounded-[14px] border border-[var(--border-color)] bg-[linear-gradient(180deg,var(--bg-white)_0%,var(--bg-light)_180%)] px-3 text-left shadow-[0_10px_30px_var(--navy-alpha-03)] transition duration-200 hover:border-[var(--blue-200)] focus-visible:border-[var(--accent-blue)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_var(--blue-alpha-25)]"
+            type="button"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[var(--accent-blue-light)] text-[var(--accent-blue)] ring-1 ring-[var(--blue-100)]">
+              <Icon className="h-4 w-4" />
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-[var(--text-primary)]">
+              {triggerLabel}
+            </span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="w-[320px] rounded-[18px] border border-[var(--border-color)] bg-[var(--white-alpha-90)] p-3 shadow-[0_24px_60px_var(--navy-alpha-20)] backdrop-blur-xl"
+          sideOffset={8}
+        >
+          <div className="space-y-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                Rango de importe
+              </p>
+              <p className="mt-1 text-[13px] text-[var(--text-secondary)]">
+                Filtra los pagos entre un mínimo y un máximo.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="space-y-1.5">
+                <span className="pl-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                  Mínimo
+                </span>
+                <div className="flex h-11 items-center rounded-[12px] border border-[var(--border-color)] bg-[var(--bg-white)] px-3 shadow-[0_6px_18px_var(--navy-alpha-03)] focus-within:border-[var(--accent-blue)] focus-within:shadow-[0_0_0_3px_var(--blue-alpha-25)]">
+                  <input
+                    className="w-full bg-transparent text-[14px] font-semibold text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+                    inputMode="decimal"
+                    min="0"
+                    onChange={(event) => setDraftMinValue(event.target.value)}
+                    placeholder="0,00"
+                    step="0.01"
+                    type="number"
+                    value={draftMinValue}
+                  />
+                </div>
+              </label>
+              <label className="space-y-1.5">
+                <span className="pl-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                  Máximo
+                </span>
+                <div className="flex h-11 items-center rounded-[12px] border border-[var(--border-color)] bg-[var(--bg-white)] px-3 shadow-[0_6px_18px_var(--navy-alpha-03)] focus-within:border-[var(--accent-blue)] focus-within:shadow-[0_0_0_3px_var(--blue-alpha-25)]">
+                  <input
+                    className="w-full bg-transparent text-[14px] font-semibold text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+                    inputMode="decimal"
+                    min="0"
+                    onChange={(event) => setDraftMaxValue(event.target.value)}
+                    placeholder="Sin límite"
+                    step="0.01"
+                    type="number"
+                    value={draftMaxValue}
+                  />
+                </div>
+              </label>
+            </div>
+            {hasInvalidDraft ? (
+              <p className="text-[12px] font-medium text-[var(--danger-red)]">
+                Revisa el rango: los importes deben ser válidos y el mínimo no puede superar al máximo.
+              </p>
+            ) : null}
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <button
+                className="inline-flex h-10 items-center justify-center rounded-[12px] px-3 text-[13px] font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-light)] hover:text-[var(--text-primary)]"
+                onClick={() => {
+                  setDraftMinValue("");
+                  setDraftMaxValue("");
+                  onChange({ maxValue: "", minValue: "" });
+                  setOpen(false);
+                }}
+                type="button"
+              >
+                Limpiar
+              </button>
+              <button
+                className="inline-flex h-10 items-center justify-center rounded-[12px] bg-[var(--accent-blue)] px-4 text-[13px] font-semibold text-[var(--white)] shadow-[0_10px_20px_var(--blue-alpha-25)] transition-colors hover:bg-[var(--blue-600)] disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={hasInvalidDraft}
+                onClick={() => {
+                  onChange({ maxValue: draftMaxValue, minValue: draftMinValue });
+                  setOpen(false);
+                }}
+                type="button"
+              >
+                Aplicar
+              </button>
+            </div>
+          </div>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 }

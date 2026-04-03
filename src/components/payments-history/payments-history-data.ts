@@ -12,6 +12,7 @@ export type PaymentEntry = {
   displayDate: string;
   business: string;
   description: string;
+  paymentTypeLabel?: string;
   category: string;
   categoryTone: PaymentCategoryTone;
   amount: number;

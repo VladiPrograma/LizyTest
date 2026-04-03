@@ -1,10 +1,7 @@
 "use client";
 
-import { authService } from "@/services/auth.service";
+import { bfClient, type ProblemDetails } from "@/services/bf-client";
 
-const DEFAULT_API_BASE_URL = "https://back.vladicode.com";
-const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_BASE_URL?.trim() || DEFAULT_API_BASE_URL;
-const PAYMENTS_ENDPOINT = `${API_BASE_URL}/payments`;
 const CURRENCY_PATTERN = /^[A-Z]{3}$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const PAYMENT_TYPE_VALUES = new Set(["ADD", "SUBTRACT"]);
@@ -109,15 +106,6 @@ export type PaymentsByBusinessDto = {
   categories: string[];
 };
 
-export type ProblemDetails = {
-  title?: string;
-  status?: number;
-  detail?: string;
-  instance?: string;
-  timestamp?: string;
-  path?: string;
-};
-
 export class PaymentsServiceError extends Error {
   readonly status: number;
   readonly problem: ProblemDetails | null;
@@ -129,14 +117,6 @@ export class PaymentsServiceError extends Error {
     this.problem = problem;
   }
 }
-
-const isProblemDetails = (value: unknown): value is ProblemDetails => {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  return "title" in value || "status" in value || "detail" in value || "path" in value;
-};
 
 const parseDateParts = (value: string) => {
   if (!DATE_PATTERN.test(value)) {
@@ -274,44 +254,6 @@ const sanitizeBody = <T extends Record<string, unknown>>(payload: T) => {
   return sanitized;
 };
 
-const parseProblemResponse = async (response: Response) => {
-  const contentType = response.headers.get("content-type") || "";
-
-  if (contentType.includes("application/json")) {
-    const body = await response.json().catch(() => null);
-
-    if (isProblemDetails(body)) {
-      return body;
-    }
-  }
-
-  const detail = await response.text().catch(() => "");
-
-  if (!detail) {
-    return null;
-  }
-
-  return {
-    detail,
-    status: response.status,
-    title: response.statusText,
-  } satisfies ProblemDetails;
-};
-
-const getErrorMessage = (problem: ProblemDetails | null, response: Response) => {
-  return problem?.detail || problem?.title || response.statusText || "Request failed.";
-};
-
-const buildUrl = (path = "", params?: URLSearchParams) => {
-  const url = new URL(`${PAYMENTS_ENDPOINT}${path}`);
-
-  if (params) {
-    url.search = params.toString();
-  }
-
-  return url.toString();
-};
-
 const buildListQueryParams = (params: ListPaymentsParams = {}) => {
   validateListParams(params);
 
@@ -385,33 +327,22 @@ const buildSummaryQueryParams = (params?: SummaryParams) => {
 };
 
 class PaymentsService {
-  private async request<T>(url: string, init?: RequestInit) {
-    const token = await authService.getIdToken();
-    const response = await fetch(url, {
-      ...init,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(init?.body ? { "Content-Type": "application/json" } : {}),
-        ...init?.headers,
-      },
+  private async request<T>(path: string, init?: RequestInit, searchParams?: URLSearchParams) {
+    return bfClient.request<T>({
+      body: init?.body,
+      contentType: init?.body ? "application/json" : undefined,
+      errorFactory: (message, status, problem) => new PaymentsServiceError(message, status, problem),
+      headers: init?.headers,
+      method: init?.method,
+      path: `/payments${path}`,
+      searchParams,
     });
-
-    if (!response.ok) {
-      const problem = await parseProblemResponse(response);
-      throw new PaymentsServiceError(getErrorMessage(problem, response), response.status, problem);
-    }
-
-    if (response.status === 204) {
-      return undefined as T;
-    }
-
-    return (await response.json()) as T;
   }
 
   async createPayment(payload: CreatePaymentPayload) {
     validateCreatePayload(payload);
 
-    const payment = await this.request<PaymentDto>(buildUrl(), {
+    const payment = await this.request<PaymentDto>("", {
       method: "POST",
       body: JSON.stringify(sanitizeBody(payload)),
     });
@@ -428,7 +359,7 @@ class PaymentsService {
 
     validateUpdatePayload(payload);
 
-    const payment = await this.request<PaymentDto>(buildUrl(`/${paymentId}`), {
+    const payment = await this.request<PaymentDto>(`/${paymentId}`, {
       method: "PATCH",
       body: JSON.stringify(sanitizeBody(payload)),
     });
@@ -443,7 +374,7 @@ class PaymentsService {
       throw new Error("paymentId is required.");
     }
 
-    await this.request<void>(buildUrl(`/${paymentId}`), {
+    await this.request<void>(`/${paymentId}`, {
       method: "DELETE",
     });
   }
@@ -453,7 +384,7 @@ class PaymentsService {
       throw new Error("paymentId is required.");
     }
 
-    const payment = await this.request<PaymentDto>(buildUrl(`/${paymentId}`), {
+    const payment = await this.request<PaymentDto>(`/${paymentId}`, {
       method: "GET",
     });
 
@@ -463,9 +394,7 @@ class PaymentsService {
   }
 
   async listPayments(params: ListPaymentsParams = {}) {
-    const result = await this.request<PagedResult<PaymentDto>>(buildUrl("", buildListQueryParams(params)), {
-      method: "GET",
-    });
+    const result = await this.request<PagedResult<PaymentDto>>("", { method: "GET" }, buildListQueryParams(params));
 
     if (!Array.isArray(result.items)) {
       throw new Error("Payments list response must contain an items array.");
@@ -479,9 +408,7 @@ class PaymentsService {
   }
 
   async getSummary(params?: SummaryParams) {
-    const summary = await this.request<PaymentsSummaryDto[]>(buildUrl("/summary", buildSummaryQueryParams(params)), {
-      method: "GET",
-    });
+    const summary = await this.request<PaymentsSummaryDto[]>("/summary", { method: "GET" }, buildSummaryQueryParams(params));
 
     if (!Array.isArray(summary)) {
       throw new Error("Payments summary response must be an array.");
@@ -492,8 +419,9 @@ class PaymentsService {
 
   async getGroupByCategory(params?: SummaryParams) {
     const groups = await this.request<PaymentsByCategoryDto[]>(
-      buildUrl("/groupByCategory", buildSummaryQueryParams(params)),
+      "/groupByCategory",
       { method: "GET" },
+      buildSummaryQueryParams(params),
     );
 
     if (!Array.isArray(groups)) {
@@ -505,8 +433,9 @@ class PaymentsService {
 
   async getGroupByBusiness(params?: SummaryParams) {
     const groups = await this.request<PaymentsByBusinessDto[]>(
-      buildUrl("/groupByBussines", buildSummaryQueryParams(params)),
+      "/groupByBussines",
       { method: "GET" },
+      buildSummaryQueryParams(params),
     );
 
     if (!Array.isArray(groups)) {
