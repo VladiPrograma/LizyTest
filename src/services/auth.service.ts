@@ -95,6 +95,16 @@ class AuthService {
     return this.auth.currentUser;
   }
 
+  async getIdToken(forceRefresh = false) {
+    const user = this.getCurrentUser();
+
+    if (!user) {
+      throw new Error("No authenticated Firebase user is available.");
+    }
+
+    return user.getIdToken(forceRefresh);
+  }
+
   onAuthStateChanged(nextOrObserver: NextOrObserver<User>) {
     return onAuthStateChanged(this.auth, nextOrObserver);
   }

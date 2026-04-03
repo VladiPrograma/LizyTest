@@ -133,7 +133,7 @@ function SelectShell({
   return (
     <label
       className={cn(
-        "relative flex h-9 items-center gap-2 rounded-[6px] border border-[var(--border-color)] bg-[var(--bg-white)] px-3 text-[13px] text-[var(--text-primary)] shadow-[0_1px_0_rgba(255,255,255,0.7)]",
+        "relative flex h-9 items-center gap-2 rounded-[6px] border border-[var(--border-color)] bg-[var(--bg-white)] px-3 text-[13px] text-[var(--text-primary)] shadow-[0_1px_0_var(--white-alpha-70)]",
         className,
       )}
     >
@@ -165,8 +165,8 @@ function SidebarNavItem({
   const itemClassName = cn(
     "flex h-11 items-center gap-3 rounded-[14px] px-3 text-[14px] font-semibold transition-colors",
     active
-      ? "border border-white/[0.15] bg-white/[0.1] text-white"
-      : "text-[var(--payments-drawer-muted)] hover:bg-white/[0.06] hover:text-white",
+      ? "border border-[var(--white-alpha-15)] bg-[var(--white-alpha-10)] text-[var(--white)]"
+      : "text-[var(--payments-drawer-muted)] hover:bg-[var(--white-alpha-06)] hover:text-[var(--white)]",
   );
 
   if (href) {
@@ -252,7 +252,7 @@ function MobilePaymentCard({
   statusLabel?: string;
 }) {
   return (
-    <article className="rounded-[18px] border border-[var(--border-color)] bg-[var(--bg-white)] p-4 shadow-[0_18px_30px_rgba(15,23,42,0.03)]">
+    <article className="rounded-[18px] border border-[var(--border-color)] bg-[var(--bg-white)] p-4 shadow-[0_18px_30px_var(--navy-alpha-03)]">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-[12px] font-medium text-[var(--text-secondary)]">{displayDate}</p>
@@ -367,7 +367,7 @@ export function PaymentsHistoryScreen() {
   if (isLoading || !isAuthenticated) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[var(--payments-page-background)] px-6 text-[var(--payments-shell-ink)]">
-        <div className="rounded-[24px] border border-white/[0.7] bg-white/[0.85] px-6 py-5 text-[16px] font-semibold shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
+        <div className="rounded-[24px] border border-[var(--white-alpha-70)] bg-[var(--white-alpha-85)] px-6 py-5 text-[16px] font-semibold shadow-[0_20px_60px_var(--navy-alpha-08)] backdrop-blur">
           Cargando historial de pagos...
         </div>
       </main>
@@ -379,32 +379,14 @@ export function PaymentsHistoryScreen() {
       <div className="pointer-events-none absolute right-8 top-14 hidden h-[220px] w-[220px] rounded-full bg-[var(--payments-accent-glow)] blur-3xl lg:block" />
       <div className="pointer-events-none absolute bottom-8 right-16 hidden h-[300px] w-[300px] rounded-full bg-[var(--payments-amber-glow)] blur-3xl lg:block" />
       <div className="relative flex min-h-screen w-full flex-col overflow-hidden bg-[var(--bg-page)] xl:flex-row">
-        <aside className="flex shrink-0 flex-col gap-5 bg-[linear-gradient(180deg,var(--payments-drawer-start)_0%,var(--payments-drawer-end)_100%)] px-6 py-7 text-white xl:w-[284px]">
+        <aside className="flex shrink-0 flex-col gap-5 bg-[linear-gradient(180deg,var(--payments-drawer-start)_0%,var(--payments-drawer-end)_100%)] px-6 py-7 text-[var(--white)] xl:w-[284px]">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[linear-gradient(135deg,var(--payments-brand-start)_0%,var(--payments-brand-end)_100%)] text-[20px] font-bold text-white">
+            <div className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[linear-gradient(135deg,var(--payments-brand-start)_0%,var(--payments-brand-end)_100%)] text-[20px] font-bold text-[var(--white)]">
               L
             </div>
             <div>
               <p className="text-[18px] font-bold">Lizy finance</p>
               <p className="text-[12px] font-medium text-[var(--payments-drawer-muted)]">Workspace overview</p>
-            </div>
-          </div>
-          <div className="rounded-[16px] border border-white/[0.1] bg-white/[0.08] p-1.5">
-            <p className="mb-2 px-2 text-[12px] font-semibold text-[var(--payments-drawer-label)]">Periodo activo</p>
-            <div className="grid grid-cols-2 gap-2">
-              {(["Mensual", "Anual"] as const).map((value) => (
-                <button
-                  className={cn(
-                    "h-10 rounded-[12px] text-[13px] font-semibold transition-colors",
-                    period === value ? "bg-white text-[var(--payments-shell-ink)]" : "text-[var(--payments-drawer-muted)] hover:bg-white/[0.08]",
-                  )}
-                  key={value}
-                  onClick={() => handlePeriodChange(value)}
-                  type="button"
-                >
-                  {value}
-                </button>
-              ))}
             </div>
           </div>
           <div className="space-y-5">
@@ -424,14 +406,14 @@ export function PaymentsHistoryScreen() {
               </div>
             ))}
           </div>
-          <div className="mt-auto rounded-[20px] border border-white/[0.1] bg-white/[0.08] p-4">
-            <p className="text-[13px] font-bold text-white">Vista integrada</p>
+          <div className="mt-auto rounded-[20px] border border-[var(--white-alpha-10)] bg-[var(--white-alpha-08)] p-4">
+            <p className="text-[13px] font-bold text-[var(--white)]">Version 0.0.1</p>
             <p className="mt-2 text-[12px] leading-5 text-[var(--payments-drawer-muted)]">
-              La tabla vive dentro del shell principal con drawer persistente y fondo ambiental estable para desktop.
+              Tenga en cuenta que esta app esta en desarrollo. Es probable que encuentre fallos, si esto sucede no dude en ponerse en contacto con nosotros enviando un email: info@visco.uno
             </p>
           </div>
           <Button
-            className="h-11 rounded-[14px] bg-white/[0.1] text-white hover:bg-white/[0.14]"
+            className="h-11 rounded-[14px] bg-[var(--white-alpha-10)] text-[var(--white)] hover:bg-[var(--white-alpha-14)]"
             disabled={isPending}
             onClick={handleLogout}
             type="button"
@@ -456,11 +438,11 @@ export function PaymentsHistoryScreen() {
               <div className="flex flex-wrap gap-2">
                 <Button className="h-9 rounded-[8px] bg-[var(--bg-white)] px-3 text-[13px] font-semibold text-[var(--text-primary)] shadow-none ring-1 ring-[var(--border-color)] hover:bg-[var(--accent-blue-light)]">
                   <Plus className="h-4 w-4" />
-                  Add
+                  Nuevo pago
                 </Button>
                 <Button className="h-9 rounded-[8px] bg-[var(--bg-white)] px-3 text-[13px] font-semibold text-[var(--text-secondary)] shadow-none ring-1 ring-[var(--border-color)] hover:bg-[var(--accent-blue-light)]">
                   <Download className="h-4 w-4" />
-                  JSON
+                  EXCEL
                 </Button>
               </div>
             </div>
@@ -661,7 +643,7 @@ export function PaymentsHistoryScreen() {
                   </button>
                   <button
                     aria-label="Página siguiente"
-                    className="flex h-9 w-9 items-center justify-center rounded-[6px] border border-[var(--accent-blue)] bg-[var(--accent-blue-light)] text-[var(--accent-blue)] disabled:opacity-40"
+                    className="flex h-9 w-9 items-center justify-center rounded-[6px] border border-[var(--border-color)] bg-[var(--bg-white)] text-[var(--text-secondary)] disabled:opacity-40"
                     disabled={safePage === totalPages}
                     onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
                     type="button"
@@ -779,7 +761,7 @@ export function PaymentsHistoryScreen() {
                   </p>
                 </div>
                 <button
-                  className="inline-flex h-9 items-center justify-center rounded-full border border-[var(--payments-soft-blue-border)] bg-white px-4 text-[13px] font-bold text-[var(--accent-blue)]"
+                  className="inline-flex h-9 items-center justify-center rounded-full border border-[var(--payments-soft-blue-border)] bg-[var(--white)] px-4 text-[13px] font-bold text-[var(--accent-blue)]"
                   type="button"
                 >
                   Personalizar

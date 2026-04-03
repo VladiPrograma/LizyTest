@@ -1,46 +1,164 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #111111;
-  --accent-blue: #2563eb;
-  --accent-blue-light: #eff6ff;
-  --bg-light: #f7f8fa;
-  --bg-page: #f9fafb;
-  --bg-white: #ffffff;
-  --border-color: #e5e7eb;
-  --cat-energy: #d97706;
-  --cat-housing: #6366f1;
-  --cat-office: #14b8a6;
-  --cat-office-bg: #f0fdfa;
-  --cat-restaurant: #f97316;
-  --cat-restaurant-bg: #fff7ed;
-  --cat-services: #8b5cf6;
-  --cat-services-bg: #f5f3ff;
-  --cat-software: #ec4899;
-  --cat-software-bg: #fdf2f8;
-  --cat-transport: #0ea5e9;
-  --cat-transport-bg: #f0f9ff;
-  --danger-red: #dc2626;
-  --success-green: #16a34a;
-  --text-muted: #9ca3af;
-  --text-primary: #111111;
-  --text-secondary: #6b7280;
-  --payments-page-background: #f4f7fb;
-  --payments-page-warm: #fff8ee;
-  --payments-accent-glow: #93c5fd40;
-  --payments-amber-glow: #f59e0b24;
-  --payments-drawer-start: #0f172a;
-  --payments-drawer-end: #1e3a8a;
-  --payments-drawer-label: #93c5fd;
-  --payments-drawer-muted: #c7d2fe;
-  --payments-brand-start: #38bdf8;
-  --payments-brand-end: #2563eb;
-  --payments-shell-ink: #0f172a;
-  --payments-soft-blue-panel: #f8fbff;
-  --payments-soft-blue-border: #bfdbfe;
-  --payments-soft-blue-icon: #dbeafe;
-  --payments-add-card-title: #1f2937;
+  /* Alpha */
+  --amber-alpha-14: rgba(245, 158, 11, 0.14);
+  --black-alpha-03: rgba(0, 0, 0, 0.03);
+  --black-alpha-04: rgba(0, 0, 0, 0.04);
+  --black-alpha-05: rgba(0, 0, 0, 0.05);
+  --black-alpha-06: rgba(0, 0, 0, 0.06);
+  --black-alpha-08: rgba(0, 0, 0, 0.08);
+  --black-alpha-20: rgba(0, 0, 0, 0.2);
+  --black-alpha-60: rgba(0, 0, 0, 0.6);
+  --blue-alpha-25: rgba(147, 197, 253, 0.25);
+  --indigo-alpha-18: rgba(31, 38, 135, 0.18);
+  --navy-alpha-03: rgba(15, 23, 42, 0.03);
+  --navy-alpha-08: rgba(15, 23, 42, 0.08);
+  --navy-alpha-20: rgba(10, 24, 38, 0.2);
+  --navy-alpha-24: rgba(10, 24, 38, 0.24);
+  --ocean-alpha-04: rgba(9, 28, 41, 0.04);
+  --ocean-alpha-08: rgba(9, 28, 41, 0.08);
+  --ocean-alpha-34: rgba(9, 28, 41, 0.34);
+  --white-alpha-06: rgba(255, 255, 255, 0.06);
+  --white-alpha-08: rgba(255, 255, 255, 0.08);
+  --white-alpha-10: rgba(255, 255, 255, 0.1);
+  --white-alpha-14: rgba(255, 255, 255, 0.14);
+  --white-alpha-15: rgba(255, 255, 255, 0.15);
+  --white-alpha-20: rgba(255, 255, 255, 0.2);
+  --white-alpha-35: rgba(255, 255, 255, 0.35);
+  --white-alpha-58: rgba(255, 255, 255, 0.58);
+  --white-alpha-70: rgba(255, 255, 255, 0.7);
+  --white-alpha-85: rgba(255, 255, 255, 0.85);
+  --white-alpha-90: rgba(255, 255, 255, 0.9);
+
+  /* Amber */
+  --amber-600: #d97706;
+
+  /* Blue */
+  --blue-950: #0f172a;
+  --blue-800: #1e3a8a;
+  --blue-700: #2563eb;
+  --blue-600: #3a86d8;
+  --blue-500: #38bdf8;
+  --blue-300: #93c5fd;
+  --blue-200: #bfdbfe;
+  --blue-100: #dbeafe;
+  --blue-50: #eff6ff;
+  --blue-25: #f8fbff;
+
+  /* Cloud */
+  --cloud-100: #f4f7fb;
+
+  /* Cyan */
+  --cyan-500: #0ea5e9;
+  --cyan-50: #f0f9ff;
+
+  /* Green */
+  --green-600: #16a34a;
+
+  /* Indigo */
+  --indigo-500: #6366f1;
+  --indigo-100: #c7d2fe;
+
+  /* Neutral */
+  --neutral-950: #111111;
+  --neutral-900: #262626;
+  --neutral-800: #3a3a3a;
+  --neutral-700: #5a5a5a;
+  --neutral-600: #777777;
+  --neutral-500: #b8b8b8;
+  --neutral-300: #e5e7eb;
+  --neutral-100: #f7f8fa;
+  --neutral-50: #f9fafb;
+
+  /* Orange */
+  --orange-500: #f97316;
+  --orange-50: #fff7ed;
+
+  /* Pink */
+  --pink-500: #ec4899;
+  --pink-50: #fdf2f8;
+
+  /* Red */
+  --red-600: #dc2626;
+
+  /* Sand */
+  --sand-950: #1f1b17;
+  --sand-900: #26221d;
+  --sand-800: #3d372f;
+  --sand-700: #5f594f;
+  --sand-600: #7f786d;
+  --sand-500: #9a9388;
+  --sand-400: #b4ada1;
+  --sand-300: #d8d3cb;
+  --sand-250: #e7e3db;
+  --sand-200: #ece5db;
+  --sand-150: #f3efe8;
+  --sand-100: #f4f0e8;
+  --sand-50: #fbf9f5;
+  --sand-25: #fff8ee;
+
+  /* Sky */
+  --sky-400: #78b7ef;
+
+  /* Slate */
+  --slate-800: #1f2937;
+  --slate-500: #6b7280;
+  --slate-400: #9ca3af;
+
+  /* Teal */
+  --teal-500: #14b8a6;
+  --teal-400: #4da58e;
+  --teal-50: #f0fdfa;
+
+  /* Violet */
+  --violet-500: #8b5cf6;
+  --violet-50: #f5f3ff;
+
+  /* White */
+  --white: #ffffff;
+
+  /* Semantic aliases */
+  --background: var(--white);
+  --foreground: var(--neutral-950);
+  --accent-blue: var(--blue-700);
+  --accent-blue-light: var(--blue-50);
+  --bg-light: var(--neutral-100);
+  --bg-page: var(--neutral-50);
+  --bg-white: var(--white);
+  --border-color: var(--neutral-300);
+  --cat-energy: var(--amber-600);
+  --cat-housing: var(--indigo-500);
+  --cat-office: var(--teal-500);
+  --cat-office-bg: var(--teal-50);
+  --cat-restaurant: var(--orange-500);
+  --cat-restaurant-bg: var(--orange-50);
+  --cat-services: var(--violet-500);
+  --cat-services-bg: var(--violet-50);
+  --cat-software: var(--pink-500);
+  --cat-software-bg: var(--pink-50);
+  --cat-transport: var(--cyan-500);
+  --cat-transport-bg: var(--cyan-50);
+  --danger-red: var(--red-600);
+  --success-green: var(--green-600);
+  --text-muted: var(--slate-400);
+  --text-primary: var(--neutral-950);
+  --text-secondary: var(--slate-500);
+  --payments-page-background: var(--cloud-100);
+  --payments-page-warm: var(--sand-25);
+  --payments-accent-glow: var(--blue-alpha-25);
+  --payments-amber-glow: var(--amber-alpha-14);
+  --payments-drawer-start: var(--blue-950);
+  --payments-drawer-end: var(--blue-800);
+  --payments-drawer-label: var(--blue-300);
+  --payments-drawer-muted: var(--indigo-100);
+  --payments-brand-start: var(--blue-500);
+  --payments-brand-end: var(--blue-700);
+  --payments-shell-ink: var(--blue-950);
+  --payments-soft-blue-panel: var(--blue-25);
+  --payments-soft-blue-border: var(--blue-200);
+  --payments-soft-blue-icon: var(--blue-100);
+  --payments-add-card-title: var(--slate-800);
 }
 
 @theme inline {

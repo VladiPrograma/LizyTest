@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { Eye, EyeOff, Reply, Send, X, Quote } from 'lucide-react';
+import { EyeOff, Quote, Reply, Send, X } from 'lucide-react';
 
 interface GuestbookEntryProps {
   id: string;
@@ -125,7 +125,7 @@ export function GuestbookEntry({
               value={replyText}
               onChange={(e) => setReplyText(e.target.value)}
               placeholder={`Reply to ${username}...`}
-              className="flex-1 min-h-[80px] px-3 py-2 bg-white/10 border border-input rounded-lg placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all text-foreground resize-none"
+              className="min-h-[80px] flex-1 resize-none rounded-lg border border-input bg-[var(--white-alpha-10)] px-3 py-2 text-foreground transition-all placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
               disabled={isSubmitting}
               maxLength={1000}
             />
@@ -156,7 +156,7 @@ export function GuestbookEntry({
               >
                 {isSubmitting ? (
                   <>
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white mr-1" />
+                    <div className="mr-1 h-4 w-4 animate-spin rounded-full border-2 border-[var(--white-alpha-20)] border-t-[var(--white)]" />
                     Replying...
                   </>
                 ) : (

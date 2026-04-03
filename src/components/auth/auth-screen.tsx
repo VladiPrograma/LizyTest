@@ -96,10 +96,10 @@ function InputShell({
   rightAdornment?: React.ReactNode;
 }) {
   return (
-    <label className="flex h-[48px] items-center rounded-[16px] border border-[#b8b8b8] bg-white px-4 text-[#818181] shadow-[0_2px_10px_rgba(0,0,0,0.03)]">
-      <span className="mr-3 flex shrink-0 items-center text-[#727272]">{icon}</span>
+    <label className="flex h-[48px] items-center rounded-[16px] border border-[var(--neutral-500)] bg-[var(--white)] px-4 text-[var(--neutral-600)] shadow-[0_2px_10px_var(--black-alpha-03)]">
+      <span className="mr-3 flex shrink-0 items-center text-[var(--neutral-600)]">{icon}</span>
       <input
-        className="w-full border-none bg-transparent text-[16px] font-medium text-[#3a3a3a] outline-none placeholder:text-[#777777]"
+        className="w-full border-none bg-transparent text-[16px] font-medium text-[var(--neutral-800)] outline-none placeholder:text-[var(--neutral-600)]"
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         type={type}
@@ -207,16 +207,16 @@ export function AuthScreen() {
   };
 
   return (
-    <main className="relative min-h-screen min-w-[1280px] overflow-hidden bg-[#78b7ef] text-[#141414]">
+    <main className="relative min-h-screen min-w-[1280px] overflow-hidden bg-[var(--sky-400)] text-[var(--neutral-950)]">
       <div
         aria-hidden="true"
         className="absolute inset-0 bg-cover bg-center bg-no-repeat"
         style={{ backgroundImage: "url('/login-bg.jpg')" }}
       />
-      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(9,28,41,0.34)_0%,rgba(9,28,41,0.04)_45%,rgba(9,28,41,0.08)_100%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,var(--ocean-alpha-34)_0%,var(--ocean-alpha-04)_45%,var(--ocean-alpha-08)_100%)]" />
 
       <div className="relative flex min-h-screen flex-col px-7 pb-10 pt-7">
-        <header className="w-fit rounded-[20px] border border-white/35 bg-white/58 px-7 py-3 shadow-[0_18px_40px_rgba(31,38,135,0.18)] backdrop-blur-[18px]">
+        <header className="w-fit rounded-[20px] border border-[var(--white-alpha-35)] bg-[var(--white-alpha-58)] px-7 py-3 shadow-[0_18px_40px_var(--indigo-alpha-18)] backdrop-blur-[18px]">
           <div className="flex items-center gap-10">
             <Image
               alt="Lizy logo"
@@ -226,22 +226,22 @@ export function AuthScreen() {
               src="/logo.png"
               width={182}
             />
-            <nav className="flex items-center gap-9 text-[14px] font-medium text-[#303030]">
+            <nav className="flex items-center gap-9 text-[14px] font-medium text-[var(--neutral-800)]">
               {navigationItems.map((item) => (
                 <a href="#" key={item}>
                   {item}
                 </a>
               ))}
             </nav>
-            <Button className="h-[44px] rounded-[14px] bg-[#262626] px-7 text-[15px] font-semibold text-white hover:bg-[#1d1d1d]">
+            <Button className="h-[44px] rounded-[14px] bg-[var(--neutral-900)] px-7 text-[15px] font-semibold text-[var(--white)] hover:bg-[var(--neutral-950)]">
               Get in touch
             </Button>
           </div>
         </header>
 
         <section className="flex flex-1 items-end justify-between">
-          <div className="max-w-[640px] pb-12 pl-2 text-white">
-            <h1 className="text-[58px] leading-[1.06] font-normal tracking-[-0.04em] drop-shadow-[0_8px_30px_rgba(0,0,0,0.2)]">
+          <div className="max-w-[640px] pb-12 pl-2 text-[var(--white)]">
+            <h1 className="text-[58px] leading-[1.06] font-normal tracking-[-0.04em] drop-shadow-[0_8px_30px_var(--black-alpha-20)]">
               <span className="block">We can turn your</span>
               <span className="mr-4 font-semibold">dream</span>
               <span>project into</span>
@@ -250,9 +250,9 @@ export function AuthScreen() {
           </div>
 
           <div className="mr-[28px] flex w-[492px] shrink-0 items-center justify-center self-center">
-            <div className="w-full rounded-[38px] bg-white px-[72px] py-[62px] shadow-[0_32px_90px_rgba(10,24,38,0.2)]">
+            <div className="w-full rounded-[38px] bg-[var(--white)] px-[72px] py-[62px] shadow-[0_32px_90px_var(--navy-alpha-20)]">
               <div className="mb-12 text-center">
-                <h2 className="text-[30px] font-semibold tracking-[-0.03em] text-[#111111]">
+                <h2 className="text-[30px] font-semibold tracking-[-0.03em] text-[var(--neutral-950)]">
                     Glad to see you here!<span className="text-[26px]">👋🏻</span>
                 </h2>
               </div>
@@ -296,7 +296,7 @@ export function AuthScreen() {
                     rightAdornment={
                       <button
                         aria-label={showPassword ? "Hide password" : "Show password"}
-                        className="cursor-pointer border-none bg-transparent p-0 text-[#6a6a6a]"
+                        className="cursor-pointer border-none bg-transparent p-0 text-[var(--neutral-700)]"
                         onClick={(event) => {
                           event.preventDefault();
                           setShowPassword((current) => !current);
@@ -317,7 +317,7 @@ export function AuthScreen() {
 
                 <div className="flex justify-end pr-2 pt-1">
                   <button
-                    className="border-none bg-transparent text-[14px] font-semibold text-[#3885d8]"
+                    className="border-none bg-transparent text-[14px] font-semibold text-[var(--blue-600)]"
                     onClick={handleForgotPasswordOpen}
                     type="button"
                   >
@@ -326,7 +326,7 @@ export function AuthScreen() {
                 </div>
 
                 <Button
-                  className="mt-7 h-[48px] w-full rounded-[16px] bg-[#262626] text-[20px] font-medium text-white hover:bg-[#1f1f1f]"
+                  className="mt-7 h-[48px] w-full rounded-[16px] bg-[var(--neutral-900)] text-[20px] font-medium text-[var(--white)] hover:bg-[var(--neutral-950)]"
                   disabled={isPending}
                   type="submit"
                 >
@@ -336,18 +336,18 @@ export function AuthScreen() {
                 <p
                   className={cn(
                     "min-h-6 pt-2 text-center text-[14px] font-medium",
-                    feedback.tone === "error" && "text-[#d44242]",
-                    feedback.tone === "success" && "text-[#2c7a4b]",
+                    feedback.tone === "error" && "text-[var(--danger-red)]",
+                    feedback.tone === "success" && "text-[var(--success-green)]",
                     feedback.tone === "idle" && "text-transparent",
                   )}
                 >
                   {feedback.message || "."}
                 </p>
 
-                <p className="pt-1 text-center text-[15px] text-[#555555]">
+                <p className="pt-1 text-center text-[15px] text-[var(--neutral-700)]">
                   {mode === "register" ? "Already have an account? " : "Don't have an account? "}
                   <button
-                    className="border-none bg-transparent p-0 font-semibold text-[#3a86d8]"
+                    className="border-none bg-transparent p-0 font-semibold text-[var(--blue-600)]"
                     onClick={() => {
                       setFeedback({ tone: "idle", message: "" });
                       setMode((current) => (current === "login" ? "register" : "login"));
@@ -359,15 +359,15 @@ export function AuthScreen() {
                 </p>
 
                 <div className="flex items-center gap-3 pb-1 pt-8">
-                  <div className="h-px flex-1 bg-[#5a5a5a]" />
-                  <span className="text-[11px] font-medium uppercase tracking-[0.2em] text-[#7d7d7d]">
+                  <div className="h-px flex-1 bg-[var(--neutral-700)]" />
+                  <span className="text-[11px] font-medium uppercase tracking-[0.2em] text-[var(--neutral-600)]">
                     or
                   </span>
-                  <div className="h-px flex-1 bg-[#5a5a5a]" />
+                  <div className="h-px flex-1 bg-[var(--neutral-700)]" />
                 </div>
 
                 <button
-                  className="mt-3 flex h-[46px] w-full items-center justify-center gap-3 rounded-[16px] border border-[#b9b9b9] bg-white text-[17px] font-medium text-[#414141] shadow-[0_4px_16px_rgba(0,0,0,0.04)]"
+                  className="mt-3 flex h-[46px] w-full items-center justify-center gap-3 rounded-[16px] border border-[var(--neutral-500)] bg-[var(--white)] text-[17px] font-medium text-[var(--neutral-800)] shadow-[0_4px_16px_var(--black-alpha-04)]"
                   disabled={isPending}
                   onClick={handleGoogleSignIn}
                   type="button"
@@ -396,12 +396,12 @@ export function AuthScreen() {
         }}
         open={isForgotPasswordOpen}
       >
-        <DialogContent className="max-w-[440px] rounded-[28px] border border-[#e8e1d7] bg-white p-8 text-[#211d18] shadow-[0_30px_90px_rgba(10,24,38,0.24)]">
+        <DialogContent className="max-w-[440px] rounded-[28px] border border-[var(--sand-200)] bg-[var(--white)] p-8 text-[var(--sand-950)] shadow-[0_30px_90px_var(--navy-alpha-24)]">
           <DialogHeader className="space-y-2 text-left">
-            <DialogTitle className="text-[28px] font-semibold tracking-[-0.03em] text-[#111111]">
+            <DialogTitle className="text-[28px] font-semibold tracking-[-0.03em] text-[var(--neutral-950)]">
               Recover password
             </DialogTitle>
-            <DialogDescription className="text-[15px] leading-6 text-[#7c756b]">
+            <DialogDescription className="text-[15px] leading-6 text-[var(--sand-600)]">
               Enter your account email and we will send you a password recovery link.
             </DialogDescription>
           </DialogHeader>
@@ -415,12 +415,12 @@ export function AuthScreen() {
               value={resetEmail}
             />
 
-            <p className={cn("min-h-6 pt-2 text-left text-[14px] font-medium", resetFeedback ? "text-[#d44242]" : "text-transparent")}>
+            <p className={cn("min-h-6 pt-2 text-left text-[14px] font-medium", resetFeedback ? "text-[var(--danger-red)]" : "text-transparent")}>
               {resetFeedback || "."}
             </p>
 
             <Button
-              className="mt-4 h-[48px] w-full rounded-[16px] bg-[#262626] text-[18px] font-medium text-white hover:bg-[#1f1f1f]"
+              className="mt-4 h-[48px] w-full rounded-[16px] bg-[var(--neutral-900)] text-[18px] font-medium text-[var(--white)] hover:bg-[var(--neutral-950)]"
               disabled={isPending}
               type="submit"
             >
