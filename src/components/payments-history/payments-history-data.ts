@@ -165,7 +165,7 @@ export const sidebarSections = [
   },
   {
     title: "Configuración",
-    items: [{ label: "Usuario" }, { label: "Cuenta" }, { label: "Cerrar sesión" }],
+    items: [{ label: "Usuario", href: "/dashboard/user" }, { label: "Cuenta" }, { label: "Cerrar sesión" }],
   },
 ] as const;
 

@@ -4,7 +4,14 @@ import { bfClient, type ProblemDetails } from "@/services/bf-client";
 
 const CURRENCY_PATTERN = /^[A-Z]{3}$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const PAYMENT_TYPE_VALUES = new Set(["ADD", "SUBTRACT"]);
+const PAYMENT_TYPE_VALUES = new Set([
+  "ADD",
+  "SUBTRACT",
+  "FIXED_RECURRING",
+  "VARIABLE_RECURRING",
+  "LOAN",
+  "DEBT",
+]);
 const SORT_FIELD_MAP = {
   alias: "description",
   amount: "amount",
@@ -19,7 +26,7 @@ const SORT_FIELD_MAP = {
   type: "operationType",
 } as const;
 
-export type PaymentType = "ADD" | "SUBTRACT";
+export type PaymentType = "ADD" | "SUBTRACT" | "FIXED_RECURRING" | "VARIABLE_RECURRING" | "LOAN" | "DEBT";
 export type PaymentSortField = keyof typeof SORT_FIELD_MAP;
 export type SortDirection = "ASC" | "DESC";
 
@@ -179,7 +186,7 @@ const ensureOptionalNonEmpty = (fieldName: string, value?: string | null) => {
 
 const ensureOptionalPaymentType = (fieldName: string, value?: PaymentType) => {
   if (value !== undefined && !PAYMENT_TYPE_VALUES.has(value)) {
-    throw new Error(`${fieldName} must be ADD or SUBTRACT.`);
+    throw new Error(`${fieldName} must be a valid payment type.`);
   }
 };
 

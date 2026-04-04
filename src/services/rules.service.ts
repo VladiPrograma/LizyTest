@@ -1,8 +1,6 @@
 "use client";
 
 import { bfClient, type ProblemDetails } from "@/services/bf-client";
-
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const RULE_TYPE_VALUES = new Set([
   "ADD",
   "SUBTRACT",
@@ -19,7 +17,6 @@ export type RuleType = RuleOperationType | null;
 export type RuleDto = {
   id: string;
   oldBusinessName: string;
-  date: string | null;
   description: string | null;
   businessName: string | null;
   type: RuleType;
@@ -30,7 +27,6 @@ export type RuleDto = {
 
 export type CreateRulePayload = {
   oldBusinessName: string;
-  date?: string | null;
   description?: string | null;
   businessName?: string | null;
   type?: RuleType;
@@ -41,7 +37,6 @@ export type CreateRulePayload = {
 
 export type UpdateRulePayload = {
   oldBusinessName?: string | null;
-  date?: string | null;
   description?: string | null;
   businessName?: string | null;
   type?: RuleType;
@@ -62,37 +57,6 @@ export class RulesServiceError extends Error {
   }
 }
 
-const parseDateParts = (value: string) => {
-  if (!DATE_PATTERN.test(value)) {
-    return null;
-  }
-
-  const [year, month, day] = value.split("-").map(Number);
-
-  if ([year, month, day].some(Number.isNaN)) {
-    return null;
-  }
-
-  return { day, month, year };
-};
-
-const isIsoDateString = (value: string) => {
-  const parts = parseDateParts(value);
-
-  if (!parts) {
-    return false;
-  }
-
-  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
-
-  return (
-    !Number.isNaN(date.getTime()) &&
-    date.getUTCFullYear() === parts.year &&
-    date.getUTCMonth() === parts.month - 1 &&
-    date.getUTCDate() === parts.day
-  );
-};
-
 const ensureNonEmpty = (fieldName: string, value: string) => {
   if (!value.trim()) {
     throw new Error(`${fieldName} is required.`);
@@ -102,12 +66,6 @@ const ensureNonEmpty = (fieldName: string, value: string) => {
 const ensureNonNegative = (fieldName: string, value: number) => {
   if (typeof value !== "number" || Number.isNaN(value) || value < 0) {
     throw new Error(`${fieldName} must be a number greater than or equal to 0.`);
-  }
-};
-
-const ensureOptionalDate = (fieldName: string, value?: string | null) => {
-  if (value !== undefined && value !== null && !isIsoDateString(value)) {
-    throw new Error(`${fieldName} must use YYYY-MM-DD format.`);
   }
 };
 
@@ -169,7 +127,6 @@ const normalizeOptionalAmount = (value?: number | string | null) => {
 const validateRuleDto = (rule: RuleDto) => {
   ensureNonEmpty("id", rule.id);
   ensureNonEmpty("oldBusinessName", rule.oldBusinessName);
-  ensureOptionalDate("date", rule.date);
   ensureOptionalRuleType("type", rule.type);
 
   if (rule.amount !== null) {
@@ -191,7 +148,6 @@ const validateRuleCollection = (rules: RuleDto[]) => {
 
 const validateCreatePayload = (payload: Omit<CreateRulePayload, "amount"> & { amount?: number | null }) => {
   ensureNonEmpty("oldBusinessName", payload.oldBusinessName);
-  ensureOptionalDate("date", payload.date);
   ensureOptionalRuleType("type", payload.type);
   ensureOptionalNonEmpty("description", payload.description);
   ensureOptionalNonEmpty("businessName", payload.businessName);
@@ -205,7 +161,6 @@ const validateCreatePayload = (payload: Omit<CreateRulePayload, "amount"> & { am
 
 const validateUpdatePayload = (payload: Omit<UpdateRulePayload, "amount"> & { amount?: number | null }) => {
   ensureOptionalNonEmpty("oldBusinessName", payload.oldBusinessName);
-  ensureOptionalDate("date", payload.date);
   ensureOptionalRuleType("type", payload.type);
   ensureOptionalNonEmpty("description", payload.description);
   ensureOptionalNonEmpty("businessName", payload.businessName);
@@ -220,7 +175,6 @@ const validateUpdatePayload = (payload: Omit<UpdateRulePayload, "amount"> & { am
 const buildCreatePayload = (payload: CreateRulePayload) => {
   const normalizedPayload = {
     oldBusinessName: normalizeRequiredString(payload.oldBusinessName),
-    date: normalizeOptionalString(payload.date),
     description: normalizeOptionalString(payload.description),
     businessName: normalizeOptionalString(payload.businessName),
     type: payload.type ?? null,
@@ -238,7 +192,6 @@ const buildUpdatePayload = (payload: UpdateRulePayload) => {
   const normalizedPayload = {
     oldBusinessName:
       payload.oldBusinessName === undefined ? undefined : normalizeOptionalString(payload.oldBusinessName),
-    date: payload.date === undefined ? undefined : normalizeOptionalString(payload.date),
     description:
       payload.description === undefined ? undefined : normalizeOptionalString(payload.description),
     businessName:

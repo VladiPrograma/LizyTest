@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition, type ChangeEvent, type ReactNode } from "react";
 import { Icon as IconifyIcon } from "@iconify/react";
@@ -22,7 +21,7 @@ import {
   Droplets,
   FileText,
   House,
-  LayoutDashboard,
+  Mail,
   Plus,
   ReceiptText,
   Repeat2,
@@ -30,12 +29,12 @@ import {
   Tag,
   TrendingDown,
   TrendingUp,
-  UserRound,
   Wallet,
   Wifi,
   Zap,
   type LucideIcon,
 } from "lucide-react";
+import { AppDrawer } from "@/components/layout/app-drawer";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useToast } from "@/components/providers/toast-provider";
 import { Button } from "@/components/ui/button";
@@ -60,7 +59,6 @@ import {
   fixedExpenses,
   mortgageSummary,
   rowsPerPageOptions,
-  sidebarSections,
   variableExpenses,
 } from "@/components/payments-history/payments-history-data";
 import { bankService, BankServiceError } from "@/services/bank.service";
@@ -95,20 +93,8 @@ const fixedExpenseToneClasses: Record<string, string> = {
   software: "text-[var(--cat-software)]",
 };
 
-const navIconMap: Record<string, LucideIcon> = {
-  Dashboard: LayoutDashboard,
-  "Historial de pagos": ReceiptText,
-  "Pagos por categoría": Shapes,
-  "Pagos por empresa": Building2,
-  "Pagos pendientes": CalendarCheck,
-  "Gastos variables": Activity,
-  Deudas: Wallet,
-  Usuario: UserRound,
-  Cuenta: Wallet,
-  "Cerrar sesión": ChevronRight,
-};
-
 const ALL_BUSINESSES_LABEL = "Todos los negocios";
+const ALL_SUBCATEGORIES_LABEL = "Todas las subcategorias";
 const ALL_CATEGORIES_LABEL = "Todas las categorías";
 
 const monthFormatter = new Intl.DateTimeFormat("es-ES", { month: "long", timeZone: "UTC" });
@@ -124,7 +110,7 @@ const monthNameByIndex = Array.from({ length: 12 }, (_, monthIndex) => {
   return monthName.charAt(0).toUpperCase() + monthName.slice(1);
 });
 const monthIndexByName = new Map(monthNameByIndex.map((monthName, index) => [monthName, index]));
-const selectableMonthOptions = [...monthNameByIndex].reverse();
+const selectableMonthOptions = [...monthNameByIndex];
 const defaultPeriodSelection = getPreviousMonthPeriod();
 const selectableYearOptions = Array.from({ length: 6 }, (_, index) => String(Number(defaultPeriodSelection.year) - index));
 const defaultCustomDateRange = buildDateRange("Mensual", defaultPeriodSelection.month, defaultPeriodSelection.year);
@@ -145,6 +131,10 @@ const defaultSortDirectionByField: Record<PaymentSortField, SortDirection> = {
 const paymentTypeOptions: SelectFieldOption[] = [
   { label: "Ingreso", value: "ADD" },
   { label: "Pago", value: "SUBTRACT" },
+  { label: "Pago Recurrente Fijo", value: "FIXED_RECURRING" },
+  { label: "Pago Recurrente Variable", value: "VARIABLE_RECURRING" },
+  { label: "Prestamo", value: "LOAN" },
+  { label: "Deuda", value: "DEBT" },
 ];
 const paymentTypeFormOptions: SelectFieldOption[] = [
   { label: "Selecciona tipo", value: "" },
@@ -185,6 +175,7 @@ type PaymentEditForm = {
   type: PaymentType | "";
   amount: string;
   category: string;
+  subCategory: string;
   currency: string;
   updateAll: boolean;
   bulkUpdateScope: BulkUpdateScope;
@@ -207,6 +198,12 @@ type PaymentRowEntry = {
   periodMonth: string;
   periodYear: string;
   statusLabel?: string;
+  subCategory: string | null;
+  subCategoryBadgeStyle: {
+    backgroundColor: string;
+    color: string;
+  };
+  subCategoryIconName?: string;
 };
 
 const defaultCategoryBadgeStyle = {
@@ -335,7 +332,7 @@ function normalizePaymentsMessage(error: unknown) {
 
 function normalizeCategoriesMessage(error: unknown) {
   if (error instanceof CategoryServiceError) {
-    return error.problem?.detail || error.message;
+    return error.message || error.problem?.detail || "No se pudieron cargar las categorías.";
   }
 
   if (error instanceof Error) {
@@ -403,8 +400,33 @@ function buildDateRange(
   };
 }
 
-function getPaymentTypeLabel(type: "ADD" | "SUBTRACT") {
-  return type === "ADD" ? "Ingreso" : "Pago";
+const paymentTypeLabelByValue: Record<PaymentType, string> = {
+  ADD: "Ingreso",
+  DEBT: "Deuda",
+  FIXED_RECURRING: "Pago Recurrente Fijo",
+  LOAN: "Prestamo",
+  SUBTRACT: "Pago",
+  VARIABLE_RECURRING: "Pago Recurrente Variable",
+};
+
+function getPaymentTypeLabel(type: PaymentType) {
+  return paymentTypeLabelByValue[type];
+}
+
+function getTablePaymentTypeLabel(type: PaymentType) {
+  if (type === "FIXED_RECURRING") {
+    return "Pago Fijo";
+  }
+
+  if (type === "VARIABLE_RECURRING") {
+    return "Pago Variable";
+  }
+
+  return getPaymentTypeLabel(type);
+}
+
+function getPaymentDirection(type: PaymentType): "incoming" | "outgoing" {
+  return type === "ADD" ? "incoming" : "outgoing";
 }
 
 function normalizeCategoryName(value: string | null | undefined) {
@@ -413,13 +435,19 @@ function normalizeCategoryName(value: string | null | undefined) {
   return trimmedValue ? trimmedValue.toLowerCase() : null;
 }
 
-function mapPaymentToEntry(payment: PaymentDto, categoriesByName: Map<string, CategoryDto>): PaymentRowEntry {
+function mapPaymentToEntry(
+  payment: PaymentDto,
+  categoriesByName: Map<string, CategoryDto>,
+  subcategoriesByName: Map<string, CategoryDto>,
+): PaymentRowEntry {
   const normalizedCategoryName = normalizeCategoryName(payment.category);
+  const normalizedSubCategoryName = normalizeCategoryName(payment.subCategory);
   const matchingCategory = normalizedCategoryName ? categoriesByName.get(normalizedCategoryName) : null;
+  const matchingSubCategory = normalizedSubCategoryName ? subcategoriesByName.get(normalizedSubCategoryName) : null;
 
   return {
     amount: payment.amount,
-    business: payment.businessName || (payment.type === "ADD" ? "Ingreso" : "Sin negocio"),
+    business: payment.businessName?.trim() || "Sin negocio",
     category: matchingCategory?.name ?? payment.category?.trim() ?? "Sin categoría",
     categoryBadgeStyle: matchingCategory
       ? {
@@ -429,22 +457,52 @@ function mapPaymentToEntry(payment: PaymentDto, categoriesByName: Map<string, Ca
       : defaultCategoryBadgeStyle,
     categoryIconName: matchingCategory?.iconName,
     description: payment.description || (payment.type === "ADD" ? "Ingreso registrado" : "Movimiento registrado"),
-    direction: payment.type === "ADD" ? "incoming" : "outgoing",
+    direction: getPaymentDirection(payment.type),
     displayDate: toDisplayDate(payment.date),
     id: payment.id,
     paymentTypeLabel: getPaymentTypeLabel(payment.type),
     periodMonth: toPeriodMonth(payment.date),
     periodYear: payment.date.slice(0, 4),
     statusLabel: payment.needsReview ? "Pendiente de procesar" : undefined,
+    subCategory: matchingSubCategory?.name ?? payment.subCategory?.trim() ?? null,
+    subCategoryBadgeStyle: matchingSubCategory
+      ? {
+          backgroundColor: matchingSubCategory.backgroundColor,
+          color: matchingSubCategory.color,
+        }
+      : defaultCategoryBadgeStyle,
+    subCategoryIconName: matchingSubCategory?.iconName,
   };
 }
 
-function createPaymentEditForm(payment: PaymentDto): PaymentEditForm {
+function resolveParentCategoryName(
+  subCategoryName: string | null | undefined,
+  subcategoriesByName: Map<string, CategoryDto>,
+  categoriesById: Map<string, CategoryDto>,
+) {
+  const normalizedSubCategoryName = normalizeCategoryName(subCategoryName);
+  const matchingSubCategory = normalizedSubCategoryName ? subcategoriesByName.get(normalizedSubCategoryName) : null;
+
+  if (!matchingSubCategory?.parent) {
+    return null;
+  }
+
+  return categoriesById.get(matchingSubCategory.parent)?.name ?? null;
+}
+
+function createPaymentEditForm(
+  payment: PaymentDto,
+  subcategoriesByName: Map<string, CategoryDto>,
+  categoriesById: Map<string, CategoryDto>,
+): PaymentEditForm {
+  const parentCategoryName = resolveParentCategoryName(payment.subCategory, subcategoriesByName, categoriesById);
+
   return {
     amount: String(payment.amount),
     bulkUpdateScope: "same-business",
     businessName: payment.businessName ?? "",
-    category: payment.category ?? "",
+    category: parentCategoryName ?? payment.category ?? "",
+    subCategory: payment.subCategory ?? "",
     currency: payment.currency ?? "",
     date: payment.date,
     description: payment.description ?? "",
@@ -459,6 +517,7 @@ function createEmptyPaymentEditForm(): PaymentEditForm {
     bulkUpdateScope: "same-business",
     businessName: "",
     category: "",
+    subCategory: "",
     currency: "",
     date: "",
     description: "",
@@ -505,12 +564,14 @@ function buildCreatePaymentPayload(form: PaymentEditForm): CreatePaymentPayload 
   const normalizedDescription = normalizeOptionalText(form.description);
   const normalizedBusinessName = normalizeOptionalText(form.businessName);
   const normalizedCategory = normalizeOptionalText(form.category);
+  const normalizedSubCategory = normalizeOptionalText(form.subCategory);
   const normalizedCurrency = normalizeCurrency(form.currency);
 
   return {
     amount: Number(form.amount),
     businessName: normalizedBusinessName,
     category: normalizedCategory,
+    subCategory: normalizedSubCategory,
     currency: normalizedCurrency || null,
     date: form.date,
     description: normalizedDescription,
@@ -524,6 +585,7 @@ function buildPaymentUpdatePayload(payment: PaymentDto, form: PaymentEditForm): 
   const normalizedDescription = normalizeOptionalText(form.description);
   const normalizedBusinessName = normalizeOptionalText(form.businessName);
   const normalizedCategory = normalizeOptionalText(form.category);
+  const normalizedSubCategory = normalizeOptionalText(form.subCategory);
   const normalizedCurrency = normalizeCurrency(form.currency);
   const nextCurrency = normalizedCurrency ? normalizedCurrency : null;
   const nextAmount = Number(form.amount);
@@ -552,6 +614,10 @@ function buildPaymentUpdatePayload(payment: PaymentDto, form: PaymentEditForm): 
     payload.category = normalizedCategory;
   }
 
+  if (normalizedSubCategory !== payment.subCategory) {
+    payload.subCategory = normalizedSubCategory;
+  }
+
   if (nextCurrency !== payment.currency) {
     payload.currency = nextCurrency;
   }
@@ -566,44 +632,6 @@ function formatEuroAmount(amount: number) {
 function formatSignedAmount(amount: number, direction: "incoming" | "outgoing") {
   const prefix = direction === "incoming" ? "+" : "";
   return `${prefix}${formatEuroAmount(amount)}`;
-}
-
-function SidebarNavItem({
-  label,
-  href,
-  active = false,
-}: {
-  label: string;
-  href?: string;
-  active?: boolean;
-}) {
-  const Icon = navIconMap[label] ?? ReceiptText;
-  const itemClassName = cn(
-    "flex h-11 items-center gap-3 rounded-[14px] px-3 text-[14px] font-semibold transition-colors",
-    active
-      ? "border border-[var(--white-alpha-15)] bg-[var(--white-alpha-10)] text-[var(--white)]"
-      : "text-[var(--payments-drawer-muted)] hover:bg-[var(--white-alpha-06)] hover:text-[var(--white)]",
-  );
-
-  if (href) {
-    return (
-      <Link aria-current={active ? "page" : undefined} className={itemClassName} href={href}>
-        <Icon className="h-4 w-4 shrink-0" />
-        <span>{label}</span>
-      </Link>
-    );
-  }
-
-  return (
-    <div className={itemClassName}>
-      <Icon className="h-4 w-4 shrink-0" />
-      <span>{label}</span>
-    </div>
-  );
-}
-
-function SectionTitle({ children }: { children: ReactNode }) {
-  return <p className="text-[12px] font-semibold tracking-[0.02em] text-[var(--payments-drawer-label)]">{children}</p>;
 }
 
 function PaymentCategoryBadge({
@@ -641,7 +669,7 @@ function PaymentTypeBadge({
   return (
     <span
       className={cn(
-        "inline-flex h-[26px] items-center rounded-full px-2.5 text-[12px] font-medium",
+        "inline-flex h-[26px] items-center whitespace-nowrap rounded-full px-2.5 text-[12px] font-medium",
         direction === "incoming"
           ? "bg-[var(--success-green)]/10 text-[var(--success-green)]"
           : "bg-[var(--danger-red)]/10 text-[var(--danger-red)]",
@@ -784,7 +812,7 @@ function MobilePaymentCard({
           iconName={categoryIconName}
           label={category}
         />
-        <PaymentTypeBadge direction={direction} label={paymentTypeLabel ?? getPaymentTypeLabel(direction === "incoming" ? "ADD" : "SUBTRACT")} />
+        <PaymentTypeBadge direction={direction} label={paymentTypeLabel ?? "Pago"} />
         {statusLabel ? <ReviewStatusBadge label={statusLabel} /> : null}
       </div>
     </button>
@@ -793,13 +821,16 @@ function MobilePaymentCard({
 
 function PaymentEditDialog({
   categoriesByName,
+  subcategoriesByName,
   categoryOptions,
+  subcategoryOptions,
   open,
   payment,
   form,
   error,
   isSaving,
   onCreateCategory,
+  onCreateSubCategory,
   onFieldChange,
   onBulkScopeChange,
   onOpenChange,
@@ -807,13 +838,16 @@ function PaymentEditDialog({
   onToggleUpdateAll,
 }: {
   categoriesByName: Map<string, CategoryDto>;
+  subcategoriesByName: Map<string, CategoryDto>;
   categoryOptions: SelectFieldOption[];
+  subcategoryOptions: SelectFieldOption[];
   open: boolean;
   payment: PaymentDto | null;
   form: PaymentEditForm | null;
   error: string | null;
   isSaving: boolean;
   onCreateCategory: (name: string) => Promise<SelectFieldOption | void>;
+  onCreateSubCategory: (name: string) => Promise<SelectFieldOption | void>;
   onFieldChange: <Key extends keyof PaymentEditForm>(field: Key, value: PaymentEditForm[Key]) => void;
   onBulkScopeChange: (value: BulkUpdateScope) => void;
   onOpenChange: (open: boolean) => void;
@@ -822,12 +856,13 @@ function PaymentEditDialog({
 }) {
   const isCreateMode = !payment;
   const canBulkUpdate = Boolean(payment?.businessName?.trim());
-  const paymentEntry = payment ? mapPaymentToEntry(payment, categoriesByName) : null;
+  const paymentEntry = payment ? mapPaymentToEntry(payment, categoriesByName, subcategoriesByName) : null;
   const currentBusinessName = payment?.businessName?.trim() || "Sin negocio";
+  const hasSelectedParentCategory = Boolean(form?.category.trim());
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[90vh] max-w-[760px] overflow-y-auto rounded-[28px] border border-[var(--border-color)] bg-[var(--bg-white)] p-0 shadow-[0_30px_80px_var(--navy-alpha-20)]">
+      <DialogContent className="max-h-[90vh] max-w-[760px] overflow-x-hidden overflow-y-auto rounded-[28px] border border-[var(--border-color)] bg-[var(--bg-white)] p-0 shadow-[0_30px_80px_var(--navy-alpha-20)]">
         {form ? (
           <div className="space-y-6 p-6 sm:p-7">
             <DialogHeader className="space-y-2 text-left">
@@ -848,15 +883,15 @@ function PaymentEditDialog({
                   <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
                     Pago seleccionado
                   </p>
-                  <div className="flex items-center gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
                     <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] bg-[var(--payments-soft-blue-icon)] text-[var(--accent-blue)] ring-1 ring-[var(--payments-soft-blue-border)]">
                       <Building2 className="h-5 w-5" />
                     </span>
-                    <div className="min-w-0">
-                      <p className="truncate text-[18px] font-bold tracking-[-0.02em] text-[var(--text-primary)]">
+                    <div className="min-w-0 max-w-[360px] flex-1">
+                      <p className="whitespace-normal break-words text-[18px] font-bold leading-6 tracking-[-0.02em] text-[var(--text-primary)]">
                         {currentBusinessName}
                       </p>
-                      <p className="mt-1 text-[13px] text-[var(--text-secondary)]">
+                      <p className="mt-1 break-words text-[13px] text-[var(--text-secondary)]">
                         ID {payment.id.slice(0, 8)} · {paymentEntry?.displayDate}
                       </p>
                     </div>
@@ -911,6 +946,7 @@ function PaymentEditDialog({
               />
               <SearchableSelectField
                 className="sm:col-span-1"
+                createOptionLabel="categoria"
                 icon={Tag}
                 label="Categoría"
                 onCreateOption={onCreateCategory}
@@ -919,6 +955,19 @@ function PaymentEditDialog({
                 placeholder="Busca o crea una categoría"
                 value={form.category}
               />
+              {hasSelectedParentCategory ? (
+                <SearchableSelectField
+                  className="sm:col-span-1"
+                  createOptionLabel="subcategoria"
+                  icon={Shapes}
+                  label="Subcategoria"
+                  onCreateOption={onCreateSubCategory}
+                  onChange={(value) => onFieldChange("subCategory", value)}
+                  options={subcategoryOptions}
+                  placeholder="Busca o crea una subcategoria"
+                  value={form.subCategory}
+                />
+              ) : null}
               <InputField
                 className="sm:col-span-1"
                 icon={BadgeEuro}
@@ -1067,7 +1116,7 @@ function PaymentEditDialog({
 
 export function PaymentsHistoryScreen() {
   const { isAuthenticated, isLoading, logout, user } = useAuth();
-  const { showError, showInfo, showSuccess } = useToast();
+  const { showError, showSuccess } = useToast();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -1088,6 +1137,7 @@ export function PaymentsHistoryScreen() {
   const [customEndDate, setCustomEndDate] = useState(defaultCustomDateRange.endDate);
   const [hasLoadedPeriodPreferences, setHasLoadedPeriodPreferences] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(ALL_CATEGORIES_LABEL);
+  const [selectedSubCategory, setSelectedSubCategory] = useState(ALL_SUBCATEGORIES_LABEL);
   const [selectedBusiness, setSelectedBusiness] = useState(ALL_BUSINESSES_LABEL);
   const [minAmount, setMinAmount] = useState("");
   const [maxAmount, setMaxAmount] = useState("");
@@ -1096,6 +1146,8 @@ export function PaymentsHistoryScreen() {
   const [rowsPerPage, setRowsPerPage] = useState<(typeof rowsPerPageOptions)[number]>(6);
   const [currentPage, setCurrentPage] = useState(1);
   const [categories, setCategories] = useState<CategoryDto[]>([]);
+  const [subcategories, setSubcategories] = useState<CategoryDto[]>([]);
+  const [filterSubcategories, setFilterSubcategories] = useState<CategoryDto[]>([]);
   const [currentUserProfile, setCurrentUserProfile] = useState<UserDto | null>(null);
   const [availableBusinessValues, setAvailableBusinessValues] = useState<string[]>([]);
   const [selectedPayment, setSelectedPayment] = useState<PaymentDto | null>(null);
@@ -1115,12 +1167,45 @@ export function PaymentsHistoryScreen() {
       ),
     [categories],
   );
+  const subcategoriesByName = useMemo(
+    () =>
+      new Map(
+        subcategories
+          .map((subcategory) => [normalizeCategoryName(subcategory.name), subcategory] as const)
+          .filter((entry): entry is [string, CategoryDto] => Boolean(entry[0])),
+      ),
+    [subcategories],
+  );
+  const categoriesById = useMemo(
+    () =>
+      new Map(
+        categories
+          .map((category) => [category.id, category] as const)
+          .filter((entry): entry is [string, CategoryDto] => Boolean(entry[0])),
+      ),
+    [categories],
+  );
+  const categoryIdByName = useMemo(
+    () =>
+      new Map(
+        categories
+          .map((category) => [normalizeCategoryName(category.name), category.id] as const)
+          .filter((entry): entry is [string, string] => Boolean(entry[0] && entry[1])),
+      ),
+    [categories],
+  );
+  const selectedFilterCategoryId = categoryIdByName.get(normalizeCategoryName(selectedCategory) ?? "");
+  const hasSelectedFilterCategory = Boolean(selectedFilterCategoryId && selectedCategory !== ALL_CATEGORIES_LABEL);
   const availableCategoryValues = categories.map((category) => category.name);
+  const availableSubcategoryValues = useMemo(() => {
+    return filterSubcategories.map((subcategory) => subcategory.name);
+  }, [filterSubcategories]);
   const availableCategoryOptions = [ALL_CATEGORIES_LABEL, ...availableCategoryValues];
+  const availableSubcategoryOptions = [ALL_SUBCATEGORIES_LABEL, ...availableSubcategoryValues];
   const availableBusinessOptions = [ALL_BUSINESSES_LABEL, ...availableBusinessValues];
   const paymentRows = useMemo(
-    () => payments.map((payment) => ({ entry: mapPaymentToEntry(payment, categoriesByName), payment })),
-    [categoriesByName, payments],
+    () => payments.map((payment) => ({ entry: mapPaymentToEntry(payment, categoriesByName, subcategoriesByName), payment })),
+    [categoriesByName, payments, subcategoriesByName],
   );
   const monthSelectOptions: SelectFieldOption[] = availableMonthOptions.map((option) => ({ label: option, value: option }));
   const yearSelectOptions: SelectFieldOption[] = availableYearOptions.map((option) => ({ label: option, value: option }));
@@ -1129,11 +1214,34 @@ export function PaymentsHistoryScreen() {
     label: category.name,
     value: category.name,
   }));
+  const selectedPaymentEditCategoryId = categoryIdByName.get(normalizeCategoryName(paymentEditForm?.category) ?? "");
+  const subcategoryFieldOptions: SelectFieldOption[] = useMemo(() => {
+    if (!selectedPaymentEditCategoryId) {
+      return [];
+    }
+
+    return subcategories
+      .filter((subcategory) => subcategory.parent === selectedPaymentEditCategoryId)
+      .map((subcategory) => ({
+        iconName: subcategory.iconName,
+        label: subcategory.name,
+        value: subcategory.name,
+      }));
+  }, [selectedPaymentEditCategoryId, subcategories]);
   const categorySelectOptions: SelectFieldOption[] = availableCategoryOptions.map((option) => {
     const matchingCategory = categories.find((category) => category.name === option);
 
     return {
       iconName: matchingCategory?.iconName,
+      label: option,
+      value: option,
+    };
+  });
+  const subcategorySelectOptions: SelectFieldOption[] = availableSubcategoryOptions.map((option) => {
+    const matchingSubcategory = subcategories.find((subcategory) => subcategory.name === option);
+
+    return {
+      iconName: matchingSubcategory?.iconName,
       label: option,
       value: option,
     };
@@ -1248,23 +1356,32 @@ export function PaymentsHistoryScreen() {
     let cancelled = false;
 
     const loadCategories = async () => {
-      try {
-        const nextCategories = await categoryService.listCategories();
+      const [categoriesResult, subcategoriesResult] = await Promise.allSettled([
+        categoryService.listCategories(),
+        categoryService.listSubcategories(),
+      ]);
 
-        if (cancelled) {
-          return;
-        }
-
-        setCategories(sortCategoriesByName(nextCategories));
-        setCategoriesError(null);
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        setCategories([]);
-        setCategoriesError(normalizeCategoriesMessage(error));
+      if (cancelled) {
+        return;
       }
+
+      const nextErrors: string[] = [];
+
+      if (categoriesResult.status === "fulfilled") {
+        setCategories(sortCategoriesByName(categoriesResult.value));
+      } else {
+        setCategories([]);
+        nextErrors.push(normalizeCategoriesMessage(categoriesResult.reason));
+      }
+
+      if (subcategoriesResult.status === "fulfilled") {
+        setSubcategories(sortCategoriesByName(subcategoriesResult.value));
+      } else {
+        setSubcategories([]);
+        nextErrors.push(normalizeCategoriesMessage(subcategoriesResult.reason));
+      }
+
+      setCategoriesError(nextErrors.length > 0 ? nextErrors.join(" ") : null);
     };
 
     void loadCategories();
@@ -1287,10 +1404,55 @@ export function PaymentsHistoryScreen() {
   }, [availableMonthOptions, period, selectedMonth]);
 
   useEffect(() => {
+    if (!isAuthenticated || isLoading) {
+      setFilterSubcategories([]);
+      return;
+    }
+
+    if (!hasSelectedFilterCategory || !selectedFilterCategoryId) {
+      setFilterSubcategories([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadFilterSubcategories = async () => {
+      try {
+        const nextSubcategories = await categoryService.listSubcategoriesByParent(selectedFilterCategoryId);
+
+        if (cancelled) {
+          return;
+        }
+
+        setFilterSubcategories(sortCategoriesByName(nextSubcategories));
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setFilterSubcategories([]);
+        setCategoriesError(normalizeCategoriesMessage(error));
+      }
+    };
+
+    void loadFilterSubcategories();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasSelectedFilterCategory, isAuthenticated, isLoading, selectedFilterCategoryId]);
+
+  useEffect(() => {
     if (![ALL_CATEGORIES_LABEL, ...availableCategoryValues].includes(selectedCategory)) {
       setSelectedCategory(ALL_CATEGORIES_LABEL);
     }
   }, [availableCategoryValues, selectedCategory]);
+
+  useEffect(() => {
+    if (![ALL_SUBCATEGORIES_LABEL, ...availableSubcategoryValues].includes(selectedSubCategory)) {
+      setSelectedSubCategory(ALL_SUBCATEGORIES_LABEL);
+    }
+  }, [availableSubcategoryValues, selectedSubCategory]);
 
   useEffect(() => {
     if (![ALL_BUSINESSES_LABEL, ...availableBusinessValues].includes(selectedBusiness)) {
@@ -1304,11 +1466,33 @@ export function PaymentsHistoryScreen() {
     }
   }, [currentPage, totalPages]);
 
+  useEffect(() => {
+    setPaymentEditForm((currentForm) => {
+      if (!currentForm?.subCategory.trim()) {
+        return currentForm;
+      }
+
+      const parentCategoryName = resolveParentCategoryName(currentForm.subCategory, subcategoriesByName, categoriesById);
+
+      if (!parentCategoryName || currentForm.category === parentCategoryName) {
+        return currentForm;
+      }
+
+      return {
+        ...currentForm,
+        category: parentCategoryName,
+      };
+    });
+  }, [categoriesById, subcategoriesByName]);
+
   const handleLogout = () => {
     startTransition(async () => {
       await logout();
       router.replace("/");
     });
+  };
+  const handleContact = () => {
+    window.location.href = "mailto:mdumitruvlad@gmail.com";
   };
   const safePage = Math.min(currentPage, totalPages);
   const pageStart = (safePage - 1) * rowsPerPage;
@@ -1337,6 +1521,7 @@ export function PaymentsHistoryScreen() {
 
     const { endDate, startDate } = dateRange;
     const categoryFilter = selectedCategory === ALL_CATEGORIES_LABEL ? undefined : selectedCategory;
+    const subCategoryFilter = selectedSubCategory === ALL_SUBCATEGORIES_LABEL ? undefined : selectedSubCategory;
     const businessFilter = selectedBusiness === ALL_BUSINESSES_LABEL ? undefined : selectedBusiness;
     const parsedMinAmount = minAmount ? Number(minAmount) : undefined;
     const parsedMaxAmount = maxAmount ? Number(maxAmount) : undefined;
@@ -1373,6 +1558,7 @@ export function PaymentsHistoryScreen() {
             size: rowsPerPage,
             sort: sortField,
             startDate,
+            subCategory: subCategoryFilter,
           }),
           paymentsService.getSummary({ endDate, startDate }),
           paymentsService.getGroupByBusiness({ endDate, startDate }),
@@ -1428,6 +1614,7 @@ export function PaymentsHistoryScreen() {
     rowsPerPage,
     selectedBusiness,
     selectedCategory,
+    selectedSubCategory,
     customEndDate,
     customStartDate,
     hasResolvedPayments,
@@ -1464,6 +1651,12 @@ export function PaymentsHistoryScreen() {
 
   const handleCategoryChange = (value: string) => {
     setSelectedCategory(value);
+    setSelectedSubCategory(ALL_SUBCATEGORIES_LABEL);
+    setCurrentPage(1);
+  };
+
+  const handleSubCategoryChange = (value: string) => {
+    setSelectedSubCategory(value);
     setCurrentPage(1);
   };
 
@@ -1544,7 +1737,7 @@ export function PaymentsHistoryScreen() {
 
   const handlePaymentSelect = (payment: PaymentDto) => {
     setSelectedPayment(payment);
-    setPaymentEditForm(createPaymentEditForm(payment));
+    setPaymentEditForm(createPaymentEditForm(payment, subcategoriesByName, categoriesById));
     setPaymentEditError(null);
     setIsEditDialogOpen(true);
   };
@@ -1557,11 +1750,25 @@ export function PaymentsHistoryScreen() {
   };
 
   const handlePaymentFormChange = <Key extends keyof PaymentEditForm>(field: Key, value: PaymentEditForm[Key]) => {
-    setPaymentEditForm((currentForm) => (currentForm ? { ...currentForm, [field]: value } : currentForm));
+    setPaymentEditForm((currentForm) => {
+      if (!currentForm) {
+        return currentForm;
+      }
+
+      if (field === "category") {
+        return {
+          ...currentForm,
+          category: value as PaymentEditForm["category"],
+          subCategory: "",
+        };
+      }
+
+      return { ...currentForm, [field]: value };
+    });
   };
 
   const handleCreateCategory = async (name: string) => {
-    const createdCategory = await categoryService.createCategory({ name });
+    const createdCategory = await categoryService.createCategory({ name, parent: null });
 
     setCategories((currentCategories) => sortCategoriesByName([...currentCategories, createdCategory]));
 
@@ -1569,6 +1776,25 @@ export function PaymentsHistoryScreen() {
       iconName: createdCategory.iconName,
       label: createdCategory.name,
       value: createdCategory.name,
+    } satisfies SelectFieldOption;
+  };
+
+  const handleCreateSubCategory = async (name: string) => {
+    if (!selectedPaymentEditCategoryId) {
+      throw new Error("Debes seleccionar una categoria padre antes de crear una subcategoria.");
+    }
+
+    const createdSubcategory = await categoryService.createCategory({
+      name,
+      parent: selectedPaymentEditCategoryId,
+    });
+
+    setSubcategories((currentSubcategories) => sortCategoriesByName([...currentSubcategories, createdSubcategory]));
+
+    return {
+      iconName: createdSubcategory.iconName,
+      label: createdSubcategory.name,
+      value: createdSubcategory.name,
     } satisfies SelectFieldOption;
   };
 
@@ -1589,40 +1815,6 @@ export function PaymentsHistoryScreen() {
           }
         : currentForm,
     );
-  };
-
-  const getBulkUpdateTargets = async (payment: PaymentDto, scope: BulkUpdateScope) => {
-    if (!payment.businessName?.trim()) {
-      throw new Error("Solo puedes actualizar varios pagos cuando el negocio está informado.");
-    }
-
-    const normalizedBusinessName = payment.businessName.trim().toLowerCase();
-    const candidatePayments = await paymentsService.listAllPayments({
-      business: payment.businessName,
-      direction: "DESC",
-      maxAmount: scope === "same-business-and-amount" ? payment.amount : undefined,
-      minAmount: scope === "same-business-and-amount" ? payment.amount : undefined,
-      size: 100,
-      sort: "date",
-    });
-    const matchingPayments = candidatePayments.filter((candidatePayment) => {
-      const hasSameBusinessName = candidatePayment.businessName?.trim().toLowerCase() === normalizedBusinessName;
-
-      if (!hasSameBusinessName) {
-        return false;
-      }
-
-      if (scope === "same-business-and-amount") {
-        return Math.abs(candidatePayment.amount - payment.amount) <= amountEqualityThreshold;
-      }
-
-      return true;
-    });
-    const uniquePayments = new Map(matchingPayments.map((candidatePayment) => [candidatePayment.id, candidatePayment]));
-
-    uniquePayments.set(payment.id, payment);
-
-    return [...uniquePayments.values()];
   };
 
   const handlePaymentSave = async () => {
@@ -1666,38 +1858,19 @@ export function PaymentsHistoryScreen() {
     setPaymentEditError(null);
 
     try {
-      const targetPayments = paymentEditForm.updateAll
-        ? await getBulkUpdateTargets(selectedPayment, paymentEditForm.bulkUpdateScope)
-        : [selectedPayment];
-      const updateResults = await Promise.allSettled(
-        targetPayments.map((payment) =>
-          paymentsService.updatePayment(payment.id, {
-            ...updatePayload,
-            forAll: false,
-          }),
-        ),
-      );
-      const successfulUpdates = updateResults.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
-      const failedUpdates = updateResults.filter((result) => result.status === "rejected");
-
-      if (successfulUpdates.length === 0) {
-        throw failedUpdates[0]?.reason ?? new Error("No se pudo actualizar el pago.");
-      }
-
-      const successfulPaymentsById = new Map(successfulUpdates.map((payment) => [payment.id, payment]));
+      const updatedPayment = await paymentsService.updatePayment(selectedPayment.id, {
+        ...updatePayload,
+        forAll: paymentEditForm.updateAll,
+      });
 
       setPayments((currentPayments) =>
-        currentPayments.map((payment) => successfulPaymentsById.get(payment.id) ?? payment),
+        currentPayments.map((payment) => (payment.id === updatedPayment.id ? updatedPayment : payment)),
       );
       setReloadKey((value) => value + 1);
-      if (failedUpdates.length > 0) {
-        showInfo(`Se actualizaron ${successfulUpdates.length} pagos, pero ${failedUpdates.length} no se pudieron guardar.`);
+      if (paymentEditForm.updateAll) {
+        showSuccess("Pago actualizado correctamente para la actualización masiva.");
       } else {
-        showSuccess(
-          successfulUpdates.length === 1
-            ? "Pago actualizado correctamente."
-            : `Se actualizaron ${successfulUpdates.length} pagos correctamente.`,
-        );
+        showSuccess("Pago actualizado correctamente.");
       }
       handleEditDialogOpenChange(false);
     } catch (error) {
@@ -1722,59 +1895,21 @@ export function PaymentsHistoryScreen() {
       <div className="pointer-events-none absolute right-8 top-14 hidden h-[220px] w-[220px] rounded-full bg-[var(--payments-accent-glow)] blur-3xl lg:block" />
       <div className="pointer-events-none absolute bottom-8 right-16 hidden h-[300px] w-[300px] rounded-full bg-[var(--payments-amber-glow)] blur-3xl lg:block" />
       <div className="relative flex min-h-screen w-full flex-col bg-[var(--bg-page)] xl:flex-row">
-        <aside className="flex w-full shrink-0 flex-col gap-5 bg-[linear-gradient(180deg,var(--payments-drawer-start)_0%,var(--payments-drawer-end)_100%)] px-6 py-7 text-[var(--white)] xl:fixed xl:inset-y-0 xl:left-0 xl:z-30 xl:h-screen xl:w-[284px] xl:overflow-y-auto">
-          <div className="flex items-center gap-3">
-            {drawerUserPhotoUrl ? (
-              <div
-                aria-hidden="true"
-                className="h-11 w-11 shrink-0 rounded-[14px] bg-[var(--white-alpha-10)] bg-cover bg-center ring-1 ring-[var(--white-alpha-12)]"
-                style={{ backgroundImage: `url(${drawerUserPhotoUrl})` }}
-              />
-            ) : (
-              <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] border border-[var(--white-alpha-12)] bg-[var(--white-alpha-10)] text-[17px] font-bold text-[var(--white)] shadow-[0_14px_28px_var(--navy-alpha-18)]">
-                <span>{drawerUserInitials.charAt(0)}</span>
-                <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-[8px] bg-[linear-gradient(135deg,var(--payments-brand-start)_0%,var(--payments-brand-end)_100%)] text-[10px] font-black text-[var(--white)] ring-2 ring-[var(--payments-drawer-end)]">
-                  L
-                </span>
-              </div>
-            )}
-            <div className="min-w-0">
-              <p className="truncate text-[17px] font-bold text-[var(--white)]">{drawerUserName}</p>
-              <p className="mt-0.5 truncate text-[12px] font-medium text-[var(--payments-drawer-muted)]">{drawerUserSubtitle}</p>
-            </div>
-          </div>
-          <div className="space-y-5">
-            {sidebarSections.map((section) => (
-              <div className="space-y-2" key={section.title}>
-                <SectionTitle>{section.title}</SectionTitle>
-                <div className="space-y-1.5">
-                  {section.items.map((item) => (
-                    <SidebarNavItem
-                      active={"active" in item ? item.active : false}
-                      href={"href" in item ? item.href : undefined}
-                      key={item.label}
-                      label={item.label}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="mt-auto rounded-[20px] border border-[var(--white-alpha-10)] bg-[var(--white-alpha-08)] p-4">
-            <p className="text-[13px] font-bold text-[var(--white)]">Version 0.0.1</p>
-            <p className="mt-2 text-[12px] leading-5 text-[var(--payments-drawer-muted)]">
-              Tenga en cuenta que esta app esta en desarrollo. Es probable que encuentre fallos, si esto sucede no dude en ponerse en contacto con nosotros enviando un email: info@visco.uno
-            </p>
-          </div>
-          <Button
-            className="h-11 rounded-[14px] bg-[var(--white-alpha-10)] text-[var(--white)] hover:bg-[var(--white-alpha-14)]"
-            disabled={isPending}
-            onClick={handleLogout}
-            type="button"
-          >
-            Cerrar sesión
-          </Button>
-        </aside>
+        <AppDrawer
+          activeLabel="Historial de pagos"
+          avatarBadge="L"
+          footerDescription="Esta app esta en desarrollo. Llevo 3 dias trabajando en esto, si 3 dias. Es probable que encuentres fallos, si esto sucede envia un email: info@visco.uno y respondere cuando pueda. Si me quieres enviar dinero tambien puedes. Un beso!"
+          footerTitle="Version 0.0.1"
+          itemActions={{ "Cerrar sesión": handleLogout }}
+          primaryActionDisabled={isPending}
+          primaryActionIcon={Mail}
+          primaryActionLabel="CONTACTA"
+          primaryActionOnClick={handleContact}
+          userInitial={drawerUserInitials.charAt(0)}
+          userName={drawerUserName}
+          userPhotoUrl={drawerUserPhotoUrl}
+          userSubtitle={drawerUserSubtitle}
+        />
         <section className="flex min-w-0 flex-1 flex-col bg-[var(--bg-page)] p-5 sm:p-6 lg:p-10 xl:ml-[284px] xl:min-h-screen">
           <div className="flex flex-col gap-7 rounded-[24px] bg-[var(--bg-page)]">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -1817,17 +1952,19 @@ export function PaymentsHistoryScreen() {
               </div>
             </div>
             <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="text-[13px] font-medium text-[var(--text-secondary)]">Periodo:</span>
-                  <div className="inline-flex h-[38px] rounded-[10px] border border-[var(--border-color)] bg-[var(--bg-white)] p-1">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div className="flex w-full flex-col gap-1.5 lg:max-w-[360px]">
+                  <span className="pl-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                    Periodo
+                  </span>
+                  <div className="grid h-12 grid-cols-3 gap-1 rounded-[14px] border border-[var(--border-color)] bg-[linear-gradient(180deg,var(--bg-white)_0%,var(--bg-light)_180%)] p-1 shadow-[0_10px_30px_var(--navy-alpha-03)]">
                     {(["Mensual", "Anual", "Personalizado"] as const).map((value) => (
                       <button
                         className={cn(
-                          "rounded-[8px] px-3 text-[13px] font-semibold transition-colors",
+                          "flex h-full items-center justify-center rounded-[10px] px-3 text-center text-[13px] font-semibold transition-colors",
                           period === value
-                            ? "bg-[var(--accent-blue-light)] text-[var(--accent-blue)]"
-                            : "text-[var(--text-secondary)]",
+                            ? "bg-[var(--accent-blue-light)] text-[var(--accent-blue)] shadow-[0_6px_18px_var(--navy-alpha-03)]"
+                            : "text-[var(--text-secondary)] hover:bg-[var(--bg-white)] hover:text-[var(--text-primary)]",
                         )}
                         key={value}
                         onClick={() => handlePeriodChange(value)}
@@ -1882,7 +2019,7 @@ export function PaymentsHistoryScreen() {
               </div>
               <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                 <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
                     <SearchableSelectField
                       icon={Tag}
                       label="Categoría"
@@ -1890,6 +2027,15 @@ export function PaymentsHistoryScreen() {
                       options={categorySelectOptions}
                       value={selectedCategory}
                     />
+                    {hasSelectedFilterCategory ? (
+                      <SearchableSelectField
+                        icon={Shapes}
+                        label="Subcategoria"
+                        onChange={handleSubCategoryChange}
+                        options={subcategorySelectOptions}
+                        value={selectedSubCategory}
+                      />
+                    ) : null}
                     <SelectField
                       icon={Building2}
                       label="Negocio"
@@ -1958,7 +2104,13 @@ export function PaymentsHistoryScreen() {
                           onClick={() => handleSortChange("category")}
                         />
                       </th>
-                      <th className="w-[130px] px-5 py-4 text-[12px] font-semibold tracking-[0.04em] text-[var(--text-secondary)]">
+                      <th className="w-[180px] px-5 py-4 text-[12px] font-semibold tracking-[0.04em] text-[var(--text-secondary)]">
+                        <div className="flex items-center gap-2">
+                          <Shapes className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+                          <span>Subcategoria</span>
+                        </div>
+                      </th>
+                      <th className="w-[190px] px-5 py-4 text-[12px] font-semibold tracking-[0.04em] text-[var(--text-secondary)]">
                         <SortableHeader
                           active={sortField === "type"}
                           direction={sortDirection}
@@ -1984,7 +2136,7 @@ export function PaymentsHistoryScreen() {
                       <tr>
                         <td
                           className="border-t border-[var(--border-color)] px-5 py-10 text-center text-[13px] font-medium text-[var(--text-secondary)]"
-                          colSpan={5}
+                          colSpan={6}
                         >
                           Cargando pagos...
                         </td>
@@ -1993,7 +2145,7 @@ export function PaymentsHistoryScreen() {
                       <tr>
                         <td
                           className="border-t border-[var(--border-color)] px-5 py-10 text-center text-[13px] font-medium text-[var(--text-secondary)]"
-                          colSpan={5}
+                          colSpan={6}
                         >
                           No hay pagos para el rango seleccionado.
                         </td>
@@ -2036,9 +2188,22 @@ export function PaymentsHistoryScreen() {
                             />
                           </td>
                           <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
+                            {entry.subCategory ? (
+                              <PaymentCategoryBadge
+                                backgroundColor={entry.subCategoryBadgeStyle.backgroundColor}
+                                color={entry.subCategoryBadgeStyle.color}
+                                iconName={entry.subCategoryIconName}
+                                label={entry.subCategory}
+                                showDot={!entry.subCategoryIconName}
+                              />
+                            ) : (
+                              <span className="block text-[13px] font-medium text-[var(--text-muted)]">Sin subcategoria</span>
+                            )}
+                          </td>
+                          <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
                             <PaymentTypeBadge
                               direction={entry.direction}
-                              label={entry.paymentTypeLabel ?? getPaymentTypeLabel(entry.direction === "incoming" ? "ADD" : "SUBTRACT")}
+                              label={getTablePaymentTypeLabel(payment.type)}
                             />
                           </td>
                           <td
@@ -2124,6 +2289,20 @@ export function PaymentsHistoryScreen() {
                 </div>
               </div>
             </div>
+            <section className="flex justify-center px-4 sm:px-0">
+              <div className="w-full max-w-3xl rounded-[18px] border border-dashed border-[var(--payments-soft-blue-border)] bg-[var(--payments-soft-blue-panel)] px-6 py-7 text-center shadow-[0_10px_30px_var(--navy-alpha-03)]">
+                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--accent-blue)]">
+                  Proximamente
+                </p>
+                <h2 className="mt-3 text-[22px] font-bold tracking-[-0.03em] text-[var(--text-primary)]">
+                  Visualiza tus gastos
+                </h2>
+                <p className="mx-auto mt-3 max-w-2xl text-[14px] leading-6 text-[var(--text-secondary)]">
+                  En siguientes desarrollos podras tener este tipo de paneles informativos. De
+                  momento esta zona solo sirve como avance visual.
+                </p>
+              </div>
+            </section>
             <div className="grid gap-4 xl:grid-cols-4">
               <SummaryCard icon={House} iconClassName="text-[var(--cat-software)]" title="Hipoteca">
                 <div className="space-y-4">
@@ -2249,6 +2428,7 @@ export function PaymentsHistoryScreen() {
         form={paymentEditForm}
         isSaving={isSavingPayment}
         onCreateCategory={handleCreateCategory}
+        onCreateSubCategory={handleCreateSubCategory}
         onBulkScopeChange={handleBulkScopeChange}
         onFieldChange={handlePaymentFormChange}
         onOpenChange={handleEditDialogOpenChange}
@@ -2256,6 +2436,8 @@ export function PaymentsHistoryScreen() {
         onToggleUpdateAll={handleToggleUpdateAll}
         open={isEditDialogOpen}
         payment={selectedPayment}
+        subcategoriesByName={subcategoriesByName}
+        subcategoryOptions={subcategoryFieldOptions}
       />
     </main>
   );

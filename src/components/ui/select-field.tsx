@@ -75,6 +75,7 @@ type SearchableSelectFieldProps = {
   options: SelectFieldOption[];
   onChange: (value: string) => void;
   onCreateOption?: (value: string) => Promise<SelectFieldOption | void> | SelectFieldOption | void;
+  createOptionLabel?: string;
   className?: string;
   placeholder?: string;
   emptyMessage?: string;
@@ -139,11 +140,9 @@ const isOutsideRange = (date: Date, minDate: Date | null, maxDate: Date | null) 
     return true;
   }
 
-  if (maxDate && date.getTime() > maxDate.getTime()) {
-    return true;
-  }
+  return !!(maxDate && date.getTime() > maxDate.getTime());
 
-  return false;
+
 };
 
 const canNavigateToMonth = (date: Date, minDate: Date | null, maxDate: Date | null) => {
@@ -154,11 +153,9 @@ const canNavigateToMonth = (date: Date, minDate: Date | null, maxDate: Date | nu
     return false;
   }
 
-  if (maxDate && monthStart.getTime() > maxDate.getTime()) {
-    return false;
-  }
+  return !(maxDate && monthStart.getTime() > maxDate.getTime());
 
-  return true;
+
 };
 
 const getInitialVisibleMonth = (value?: string, min?: string, max?: string) => {
@@ -498,6 +495,7 @@ export function SearchableSelectField({
   options,
   onChange,
   onCreateOption,
+  createOptionLabel = "categoria",
   className,
   placeholder = "Escribe para buscar",
   emptyMessage = "No hay opciones disponibles.",
@@ -512,7 +510,15 @@ export function SearchableSelectField({
   const selectedOption = useMemo(() => getSelectedOption(options, value), [options, value]);
   const displayValue = selectedOption?.label ?? value;
   const normalizedSearchValue = open && hasTypedSinceOpen ? normalizeSearchValue(searchValue) : "";
-  const searchMatchesExistingOption = useMemo(() => options.some((option) => option.label === searchValue), [options, searchValue]);
+  const searchMatchesExistingOption = useMemo(() => {
+    const normalizedTypedValue = normalizeSearchValue(searchValue);
+
+    if (!normalizedTypedValue) {
+      return false;
+    }
+
+    return options.some((option) => normalizeSearchValue(option.label) === normalizedTypedValue);
+  }, [options, searchValue]);
   const filteredOptions = useMemo(() => {
     if (!normalizedSearchValue || searchMatchesExistingOption) {
       return options;
@@ -586,7 +592,6 @@ export function SearchableSelectField({
       setLocalError(error instanceof Error ? error.message : "No se pudo crear la categoría.");
     } finally {
       setIsCreating(false);
-      inputRef.current?.focus();
     }
   };
 
@@ -644,7 +649,7 @@ export function SearchableSelectField({
             placeholder={placeholder}
             ref={inputRef}
             type="text"
-            value={open ? searchValue : displayValue}
+            value={open && hasTypedSinceOpen ? searchValue : displayValue}
           />
           {isCreating ? (
             <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-[var(--accent-blue)]" />
@@ -674,15 +679,15 @@ export function SearchableSelectField({
 
               {canCreateOption ? (
                 <button
-                  className="flex w-full items-start gap-2 rounded-[12px] border border-dashed border-[var(--payments-soft-blue-border)] bg-[var(--payments-soft-blue-panel)] px-3 py-2.5 text-left text-[14px] font-medium text-[var(--accent-blue)] transition-colors hover:border-[var(--accent-blue)] disabled:cursor-not-allowed disabled:opacity-60"
+                  className="flex w-full items-center gap-2 rounded-[12px] border border-dashed border-[var(--payments-soft-blue-border)] bg-[var(--payments-soft-blue-panel)] px-3 py-2.5 text-left text-[14px] font-medium text-[var(--accent-blue)] transition-colors hover:border-[var(--accent-blue)] disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={isCreating}
                   onClick={() => void handleCreate()}
                   type="button"
                 >
-                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[8px] bg-[var(--bg-white)] ring-1 ring-[var(--payments-soft-blue-border)]">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[8px] bg-[var(--bg-white)] ring-1 ring-[var(--payments-soft-blue-border)]">
                     <Plus className="h-4 w-4" />
                   </span>
-                  <span className="min-w-0 break-words leading-5">Crear categoría &quot;{searchValue.trim()}&quot;</span>
+                  <span className="min-w-0 break-words leading-5">Crear {createOptionLabel} &quot;{searchValue.trim()}&quot;</span>
                 </button>
               ) : null}
 

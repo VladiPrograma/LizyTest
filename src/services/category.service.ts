@@ -37,6 +37,14 @@ export class CategoryServiceError extends Error {
   }
 }
 
+const mapSubcategoryRequestError = (error: unknown, message: string) => {
+  if (error instanceof CategoryServiceError && error.status === 404) {
+    return new CategoryServiceError(message, error.status, null);
+  }
+
+  return error;
+};
+
 const ensureNonEmpty = (fieldName: string, value: string) => {
   if (!value.trim()) {
     throw new Error(`${fieldName} is required.`);
@@ -125,9 +133,13 @@ class CategoryService {
   }
 
   async listSubcategories() {
-    const categories = await this.request<CategoryDto[]>("/subcategories", { method: "GET" });
+    try {
+      const categories = await this.request<CategoryDto[]>("/subcategories", { method: "GET" });
 
-    return validateCategoryCollection(categories);
+      return validateCategoryCollection(categories);
+    } catch (error) {
+      throw mapSubcategoryRequestError(error, "Subcategorias no encontradas.");
+    }
   }
 
   async listSubcategoriesByParent(parentId: string) {
@@ -135,9 +147,13 @@ class CategoryService {
       throw new Error("parentId is required.");
     }
 
-    const categories = await this.request<CategoryDto[]>(`/${parentId}/subcategories`, { method: "GET" });
+    try {
+      const categories = await this.request<CategoryDto[]>(`/${parentId}/subcategories`, { method: "GET" });
 
-    return validateCategoryCollection(categories);
+      return validateCategoryCollection(categories);
+    } catch (error) {
+      throw mapSubcategoryRequestError(error, "Subcategorias no encontradas para la categoria seleccionada.");
+    }
   }
 
   async getCategory(categoryId: string) {
