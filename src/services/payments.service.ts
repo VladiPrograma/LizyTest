@@ -31,6 +31,7 @@ export type PaymentDto = {
   type: PaymentType;
   amount: number;
   category: string | null;
+  subCategory: string | null;
   currency: string | null;
   needsReview: boolean | null;
 };
@@ -50,6 +51,7 @@ export type CreatePaymentPayload = {
   description?: string | null;
   businessName?: string | null;
   category?: string | null;
+  subCategory?: string | null;
   currency?: string | null;
   needsReview?: boolean | null;
 };
@@ -61,6 +63,7 @@ export type UpdatePaymentPayload = {
   type?: PaymentType;
   amount?: number;
   category?: string | null;
+  subCategory?: string | null;
   currency?: string | null;
   needsReview?: boolean | null;
   forAll?: boolean;
@@ -78,6 +81,7 @@ export type ListPaymentsParams = {
   type?: PaymentType;
   business?: string;
   category?: string;
+  subCategory?: string;
   alias?: string;
 };
 
@@ -167,6 +171,12 @@ const ensureOptionalDate = (fieldName: string, value?: string) => {
   }
 };
 
+const ensureOptionalNonEmpty = (fieldName: string, value?: string | null) => {
+  if (value !== undefined && value !== null && !value.trim()) {
+    throw new Error(`${fieldName} cannot be empty.`);
+  }
+};
+
 const ensureOptionalPaymentType = (fieldName: string, value?: PaymentType) => {
   if (value !== undefined && !PAYMENT_TYPE_VALUES.has(value)) {
     throw new Error(`${fieldName} must be ADD or SUBTRACT.`);
@@ -184,6 +194,7 @@ const validatePaymentDto = (payment: PaymentDto) => {
 
   ensureOptionalPaymentType("type", payment.type);
   ensureNonNegative("amount", payment.amount);
+  ensureOptionalNonEmpty("subCategory", payment.subCategory);
   ensureOptionalCurrency("currency", payment.currency);
 };
 
@@ -191,6 +202,7 @@ const validateCreatePayload = (payload: CreatePaymentPayload) => {
   ensureOptionalDate("date", payload.date);
   ensureOptionalPaymentType("type", payload.type);
   ensureNonNegative("amount", payload.amount);
+  ensureOptionalNonEmpty("subCategory", payload.subCategory);
   ensureOptionalCurrency("currency", payload.currency);
 };
 
@@ -202,6 +214,7 @@ const validateUpdatePayload = (payload: UpdatePaymentPayload) => {
     ensureNonNegative("amount", payload.amount);
   }
 
+  ensureOptionalNonEmpty("subCategory", payload.subCategory);
   ensureOptionalCurrency("currency", payload.currency);
 
   const hasMutatingField = Object.entries(payload).some(([key, value]) => key !== "forAll" && value !== undefined);
@@ -301,6 +314,10 @@ const buildListQueryParams = (params: ListPaymentsParams = {}) => {
 
   if (params.category) {
     searchParams.set("category", params.category);
+  }
+
+  if (params.subCategory) {
+    searchParams.set("subCategory", params.subCategory);
   }
 
   if (params.alias) {

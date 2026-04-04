@@ -7,6 +7,7 @@ const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 export type CategoryDto = {
   id: string;
   name: string;
+  parent: string | null;
   backgroundColor: string;
   color: string;
   iconName: string;
@@ -14,6 +15,7 @@ export type CategoryDto = {
 
 export type CreateCategoryPayload = {
   name: string;
+  parent?: string | null;
 };
 
 export type UpdateCategoryPayload = {
@@ -57,6 +59,7 @@ const validateCategoryDto = (category: CategoryDto) => {
   ensureNonEmpty("id", category.id);
   ensureNonEmpty("name", category.name);
   ensureNonEmpty("iconName", category.iconName);
+  ensureOptionalNonEmpty("parent", category.parent ?? undefined);
 
   if (!HEX_COLOR_PATTERN.test(category.backgroundColor)) {
     throw new Error("backgroundColor must be a valid hex color.");
@@ -67,8 +70,21 @@ const validateCategoryDto = (category: CategoryDto) => {
   }
 };
 
+const validateCategoryCollection = (categories: CategoryDto[]) => {
+  if (!Array.isArray(categories)) {
+    throw new Error("Categories response must be an array.");
+  }
+
+  for (const category of categories) {
+    validateCategoryDto(category);
+  }
+
+  return categories;
+};
+
 const validateCreatePayload = (payload: CreateCategoryPayload) => {
   ensureNonEmpty("name", payload.name);
+  ensureOptionalNonEmpty("parent", payload.parent ?? undefined);
 };
 
 const validateUpdatePayload = (payload: UpdateCategoryPayload) => {
@@ -105,15 +121,23 @@ class CategoryService {
   async listCategories() {
     const categories = await this.request<CategoryDto[]>("", { method: "GET" });
 
-    if (!Array.isArray(categories)) {
-      throw new Error("Categories response must be an array.");
+    return validateCategoryCollection(categories);
+  }
+
+  async listSubcategories() {
+    const categories = await this.request<CategoryDto[]>("/subcategories", { method: "GET" });
+
+    return validateCategoryCollection(categories);
+  }
+
+  async listSubcategoriesByParent(parentId: string) {
+    if (!parentId.trim()) {
+      throw new Error("parentId is required.");
     }
 
-    for (const category of categories) {
-      validateCategoryDto(category);
-    }
+    const categories = await this.request<CategoryDto[]>(`/${parentId}/subcategories`, { method: "GET" });
 
-    return categories;
+    return validateCategoryCollection(categories);
   }
 
   async getCategory(categoryId: string) {
@@ -132,7 +156,10 @@ class CategoryService {
     validateCreatePayload(payload);
 
     const category = await this.request<CategoryDto>("", {
-      body: JSON.stringify({ name: payload.name.trim() }),
+      body: JSON.stringify({
+        name: payload.name.trim(),
+        parent: payload.parent ?? null,
+      }),
       method: "POST",
     });
 
