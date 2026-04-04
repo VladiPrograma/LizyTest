@@ -15,7 +15,6 @@ import {
   CalendarCheck,
   CalendarDays,
   CalendarRange,
-  Check,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
@@ -38,6 +37,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
+import { useToast } from "@/components/providers/toast-provider";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -50,9 +50,9 @@ import {
 import {
   AmountRangeField,
   CompactSelectField,
-  CreatableSelectField,
   DateField,
   InputField,
+  SearchableSelectField,
   SelectField,
   type SelectFieldOption,
 } from "@/components/ui/select-field";
@@ -67,6 +67,7 @@ import { bankService, BankServiceError } from "@/services/bank.service";
 import { categoryService, CategoryServiceError, type CategoryDto } from "@/services/category.service";
 import {
   paymentsService,
+  type CreatePaymentPayload,
   PaymentsServiceError,
   type PaymentDto,
   type PaymentType,
@@ -74,6 +75,7 @@ import {
   type SortDirection,
   type UpdatePaymentPayload,
 } from "@/services/payments.service";
+import { userService, type UserDto } from "@/services/user.service";
 import { cn } from "@/lib/utils";
 
 const euroFormatter = new Intl.NumberFormat("es-ES", {
@@ -126,6 +128,7 @@ const selectableMonthOptions = [...monthNameByIndex].reverse();
 const defaultPeriodSelection = getPreviousMonthPeriod();
 const selectableYearOptions = Array.from({ length: 6 }, (_, index) => String(Number(defaultPeriodSelection.year) - index));
 const defaultCustomDateRange = buildDateRange("Mensual", defaultPeriodSelection.month, defaultPeriodSelection.year);
+const PERIOD_PREFERENCES_STORAGE_KEY = "payments-history-period-preferences:v1";
 const defaultSortDirectionByField: Record<PaymentSortField, SortDirection> = {
   alias: "ASC",
   amount: "DESC",
@@ -140,19 +143,46 @@ const defaultSortDirectionByField: Record<PaymentSortField, SortDirection> = {
   type: "ASC",
 };
 const paymentTypeOptions: SelectFieldOption[] = [
-  { label: "Importe", value: "ADD" },
+  { label: "Ingreso", value: "ADD" },
   { label: "Pago", value: "SUBTRACT" },
+];
+const paymentTypeFormOptions: SelectFieldOption[] = [
+  { label: "Selecciona tipo", value: "" },
+  ...paymentTypeOptions,
 ];
 const currencyPattern = /^[A-Z]{3}$/;
 const amountEqualityThreshold = 0.000001;
 
 type BulkUpdateScope = "same-business" | "same-business-and-amount";
+type PeriodSelection = "Mensual" | "Anual" | "Personalizado";
+type StoredPeriodPreferences = {
+  period: PeriodSelection;
+  selectedMonth: string;
+  selectedYear: string;
+};
+
+const bulkUpdateScopeOptions: Array<{
+  description: string;
+  title: string;
+  value: BulkUpdateScope;
+}> = [
+  {
+    description: "Aplica los cambios a todos los pagos que compartan el mismo negocio.",
+    title: "Mismo negocio",
+    value: "same-business",
+  },
+  {
+    description: "Limita la actualizacion a pagos con el mismo negocio y el mismo importe actual.",
+    title: "Mismo negocio e importe",
+    value: "same-business-and-amount",
+  },
+];
 
 type PaymentEditForm = {
   date: string;
   description: string;
   businessName: string;
-  type: PaymentType;
+  type: PaymentType | "";
   amount: string;
   category: string;
   currency: string;
@@ -186,6 +216,98 @@ const defaultCategoryBadgeStyle = {
 
 const sortCategoriesByName = (categories: CategoryDto[]) =>
   [...categories].sort((left, right) => left.name.localeCompare(right.name, "es"));
+
+function inferNameFromEmail(email: string | null | undefined) {
+  const normalizedEmail = email?.trim();
+
+  if (!normalizedEmail || !normalizedEmail.includes("@")) {
+    return null;
+  }
+
+  const localPart = normalizedEmail.split("@")[0]?.trim();
+
+  if (!localPart) {
+    return null;
+  }
+
+  return localPart
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getUserDisplayName(authDisplayName: string | null | undefined, authEmail: string | null | undefined, user?: UserDto | null) {
+  const nameParts = [user?.name?.trim(), user?.lastName?.trim()].filter(Boolean);
+
+  if (nameParts.length > 0) {
+    return nameParts.join(" ");
+  }
+
+  if (authDisplayName?.trim() && !authDisplayName.includes("@")) {
+    return authDisplayName.trim();
+  }
+
+  const inferredName = inferNameFromEmail(user?.email || authEmail);
+
+  if (inferredName) {
+    return inferredName;
+  }
+
+  return authDisplayName?.trim() || authEmail?.trim() || "Usuario";
+}
+
+function getUserInitials(name: string) {
+  const nameParts = name
+    .split(" ")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (nameParts.length === 0) {
+    return "U";
+  }
+
+  return nameParts
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("");
+}
+
+function isValidStoredPeriod(value: unknown): value is PeriodSelection {
+  return value === "Mensual" || value === "Anual" || value === "Personalizado";
+}
+
+function readStoredPeriodPreferences(): StoredPeriodPreferences | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const storedValue = window.localStorage.getItem(PERIOD_PREFERENCES_STORAGE_KEY);
+
+    if (!storedValue) {
+      return null;
+    }
+
+    const parsedValue = JSON.parse(storedValue) as Partial<StoredPeriodPreferences>;
+
+    if (
+      !isValidStoredPeriod(parsedValue.period) ||
+      typeof parsedValue.selectedMonth !== "string" ||
+      typeof parsedValue.selectedYear !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      period: parsedValue.period,
+      selectedMonth: parsedValue.selectedMonth,
+      selectedYear: parsedValue.selectedYear,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function normalizeImportMessage(error: unknown) {
   if (error instanceof BankServiceError) {
@@ -282,7 +404,7 @@ function buildDateRange(
 }
 
 function getPaymentTypeLabel(type: "ADD" | "SUBTRACT") {
-  return type === "ADD" ? "Importe" : "Pago";
+  return type === "ADD" ? "Ingreso" : "Pago";
 }
 
 function normalizeCategoryName(value: string | null | undefined) {
@@ -331,6 +453,20 @@ function createPaymentEditForm(payment: PaymentDto): PaymentEditForm {
   };
 }
 
+function createEmptyPaymentEditForm(): PaymentEditForm {
+  return {
+    amount: "",
+    bulkUpdateScope: "same-business",
+    businessName: "",
+    category: "",
+    currency: "",
+    date: "",
+    description: "",
+    type: "",
+    updateAll: false,
+  };
+}
+
 function normalizeOptionalText(value: string) {
   const trimmedValue = value.trim();
 
@@ -346,6 +482,10 @@ function validatePaymentEditForm(form: PaymentEditForm) {
     return "Debes indicar una fecha.";
   }
 
+  if (!form.type) {
+    return "Debes seleccionar un tipo.";
+  }
+
   const amount = Number(form.amount);
 
   if (!form.amount || Number.isNaN(amount) || amount < 0) {
@@ -359,6 +499,24 @@ function validatePaymentEditForm(form: PaymentEditForm) {
   }
 
   return null;
+}
+
+function buildCreatePaymentPayload(form: PaymentEditForm): CreatePaymentPayload {
+  const normalizedDescription = normalizeOptionalText(form.description);
+  const normalizedBusinessName = normalizeOptionalText(form.businessName);
+  const normalizedCategory = normalizeOptionalText(form.category);
+  const normalizedCurrency = normalizeCurrency(form.currency);
+
+  return {
+    amount: Number(form.amount),
+    businessName: normalizedBusinessName,
+    category: normalizedCategory,
+    currency: normalizedCurrency || null,
+    date: form.date,
+    description: normalizedDescription,
+    needsReview: false,
+    type: form.type as PaymentType,
+  };
 }
 
 function buildPaymentUpdatePayload(payment: PaymentDto, form: PaymentEditForm): UpdatePaymentPayload {
@@ -382,7 +540,7 @@ function buildPaymentUpdatePayload(payment: PaymentDto, form: PaymentEditForm): 
     payload.businessName = normalizedBusinessName;
   }
 
-  if (form.type !== payment.type) {
+  if (form.type && form.type !== payment.type) {
     payload.type = form.type;
   }
 
@@ -662,6 +820,7 @@ function PaymentEditDialog({
   onSubmit: () => void;
   onToggleUpdateAll: () => void;
 }) {
+  const isCreateMode = !payment;
   const canBulkUpdate = Boolean(payment?.businessName?.trim());
   const paymentEntry = payment ? mapPaymentToEntry(payment, categoriesByName) : null;
   const currentBusinessName = payment?.businessName?.trim() || "Sin negocio";
@@ -669,17 +828,20 @@ function PaymentEditDialog({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="max-h-[90vh] max-w-[760px] overflow-y-auto rounded-[28px] border border-[var(--border-color)] bg-[var(--bg-white)] p-0 shadow-[0_30px_80px_var(--navy-alpha-20)]">
-        {payment && form ? (
+        {form ? (
           <div className="space-y-6 p-6 sm:p-7">
             <DialogHeader className="space-y-2 text-left">
               <DialogTitle className="text-[24px] font-bold tracking-[-0.03em] text-[var(--text-primary)]">
-                Editar pago
+                {isCreateMode ? "Nuevo pago" : "Editar pago"}
               </DialogTitle>
               <DialogDescription className="text-[14px] leading-6 text-[var(--text-secondary)]">
-                Ajusta los datos del movimiento y decide si quieres propagar los cambios al resto de pagos con el mismo negocio.
+                {isCreateMode
+                  ? "Completa los datos del movimiento para registrar un nuevo pago manualmente."
+                  : "Ajusta los datos del movimiento y decide si quieres propagar los cambios al resto de pagos con el mismo negocio."}
               </DialogDescription>
             </DialogHeader>
 
+            {!isCreateMode ? (
             <div className="rounded-[24px] border border-[var(--payments-soft-blue-border)] bg-[linear-gradient(135deg,var(--payments-soft-blue-panel)_0%,var(--bg-white)_100%)] p-5 shadow-[0_18px_40px_var(--navy-alpha-03)]">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-2">
@@ -721,6 +883,7 @@ function PaymentEditDialog({
                 </div>
               </div>
             </div>
+            ) : null}
 
             <div className="grid gap-3 sm:grid-cols-2">
               <DateField
@@ -734,8 +897,8 @@ function PaymentEditDialog({
                 className="sm:col-span-1"
                 icon={Repeat2}
                 label="Tipo"
-                onChange={(value) => onFieldChange("type", value as PaymentType)}
-                options={paymentTypeOptions}
+                onChange={(value) => onFieldChange("type", value as PaymentEditForm["type"])}
+                options={paymentTypeFormOptions}
                 value={form.type}
               />
               <InputField
@@ -746,7 +909,7 @@ function PaymentEditDialog({
                 placeholder="Mercadona"
                 value={form.businessName}
               />
-              <CreatableSelectField
+              <SearchableSelectField
                 className="sm:col-span-1"
                 icon={Tag}
                 label="Categoría"
@@ -786,75 +949,86 @@ function PaymentEditDialog({
               />
             </div>
 
-            <div className="rounded-[22px] border border-[var(--payments-soft-blue-border)] bg-[var(--payments-soft-blue-panel)] p-4 shadow-[inset_0_1px_0_var(--white-alpha-70)]">
-              <button
-                className="flex w-full items-start gap-3 text-left"
-                disabled={!canBulkUpdate}
-                onClick={onToggleUpdateAll}
-                type="button"
-              >
-                <span
-                  className={cn(
-                    "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] border transition-colors",
-                    form.updateAll
-                      ? "border-[var(--accent-blue)] bg-[var(--accent-blue)] text-[var(--white)]"
-                      : "border-[var(--payments-soft-blue-border)] bg-[var(--bg-white)] text-transparent",
-                    !canBulkUpdate ? "opacity-40" : "",
-                  )}
-                >
-                  <Check className="h-3.5 w-3.5" />
-                </span>
-                <span className="space-y-1">
-                  <span className="block text-[14px] font-semibold text-[var(--text-primary)]">Actualizar todos</span>
-                  <span className="block text-[13px] leading-6 text-[var(--text-secondary)]">
-                    {canBulkUpdate
-                      ? `Usa el negocio actual "${payment.businessName}" como referencia para propagar los cambios.`
-                      : "Solo está disponible cuando el pago tiene un negocio informado."}
-                  </span>
-                </span>
-              </button>
-
-              {form.updateAll && canBulkUpdate ? (
-                <div className="mt-4 space-y-3 rounded-[18px] border border-[var(--payments-soft-blue-border)] bg-[var(--bg-white)] p-3 shadow-[0_12px_24px_var(--navy-alpha-03)]">
-                  <p className="text-[13px] font-medium leading-6 text-[var(--text-secondary)]">
-                    ¿Quieres aplicarlo a todos los pagos con ese negocio o solo a los que además comparten el importe actual?
-                  </p>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {([
-                      {
-                        description: "Propaga los cambios a todos los pagos con el mismo negocio.",
-                        title: "Mismo negocio",
-                        value: "same-business",
-                      },
-                      {
-                        description: "Solo afecta a pagos con el mismo negocio y el mismo importe actual.",
-                        title: "Mismo negocio e importe",
-                        value: "same-business-and-amount",
-                      },
-                    ] as const).map((option) => (
-                      <button
-                        className={cn(
-                          "rounded-[16px] border px-4 py-3 text-left transition-colors",
-                          form.bulkUpdateScope === option.value
-                            ? "border-[var(--payments-soft-blue-border)] bg-[var(--payments-soft-blue-panel)] shadow-[0_12px_24px_var(--navy-alpha-03)]"
-                            : "border-[var(--border-color)] bg-[var(--bg-white)] hover:border-[var(--blue-200)]",
-                        )}
-                        key={option.value}
-                        onClick={() => onBulkScopeChange(option.value)}
-                        type="button"
-                      >
-                        <span className="block text-[13px] font-semibold text-[var(--text-primary)]">{option.title}</span>
-                        <span className="mt-1 block text-[12px] leading-5 text-[var(--text-secondary)]">
-                          {option.description}
-                        </span>
-                      </button>
-                    ))}
+            {!isCreateMode ? (
+              <section className="overflow-hidden rounded-[16px] border border-[#E5E7EB] bg-[var(--bg-white)] shadow-[0_20px_45px_rgba(15,23,42,0.06)]">
+                <div className="flex flex-col gap-5 px-7 pb-7 pt-7 sm:flex-row sm:items-start sm:justify-between sm:px-8">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#6B7280]">
+                      ACTUALIZACION MASIVA
+                    </p>
+                    <h3 className="mt-2 text-[20px] font-bold tracking-[-0.02em] text-[#111111]">
+                      Actualizar todos los pagos relacionados
+                    </h3>
+                    <p className="mt-2 max-w-[440px] text-[14px] leading-[1.5] text-[#6B7280]">
+                      {canBulkUpdate
+                        ? `Se aplicara usando "${currentBusinessName}" como referencia principal.`
+                        : "Necesitas indicar un negocio en este pago para poder usar esta actualizacion masiva."}
+                    </p>
                   </div>
+                  <button
+                    aria-label="Activar actualizacion masiva"
+                    aria-pressed={form.updateAll}
+                    className={cn(
+                      "flex h-[26px] w-[48px] shrink-0 items-center rounded-full p-[3px] transition-colors focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_var(--blue-alpha-25)]",
+                      form.updateAll && canBulkUpdate ? "justify-end bg-[#2563EB]" : "justify-start bg-[#E5E7EB]",
+                      !canBulkUpdate ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+                    )}
+                    disabled={!canBulkUpdate}
+                    onClick={onToggleUpdateAll}
+                    type="button"
+                  >
+                    <span className="h-[20px] w-[20px] rounded-full bg-[var(--bg-white)] shadow-[0_1px_2px_rgba(15,23,42,0.18)]" />
+                  </button>
                 </div>
-              ) : null}
-            </div>
 
-            {payment.needsReview ? (
+                {form.updateAll && canBulkUpdate ? (
+                  <div className="px-7 pb-6 pt-6 sm:px-8">
+                    <div className="h-px bg-[#F3F4F6]" />
+                    <div className="pt-6">
+                      <p className="text-[15px] font-semibold text-[#111111]">Alcance de la actualizacion</p>
+                      <p className="mt-2 max-w-[470px] text-[13px] leading-[1.5] text-[#6B7280]">
+                        Elige como localizar los pagos que se actualizaran automaticamente.
+                      </p>
+                      <div aria-label="Alcance de la actualizacion" className="mt-5" role="radiogroup">
+                        {bulkUpdateScopeOptions.map((option, optionIndex) => {
+                          const isSelected = form.bulkUpdateScope === option.value;
+
+                          return (
+                            <div
+                              className={cn(optionIndex > 0 ? "border-t border-[#F3F4F6]" : "")}
+                              key={option.value}
+                            >
+                              <button
+                                aria-checked={isSelected}
+                                className="flex w-full items-start gap-3 py-4 text-left transition-colors focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_var(--blue-alpha-25)]"
+                                onClick={() => onBulkScopeChange(option.value)}
+                                role="radio"
+                                type="button"
+                              >
+                                <span
+                                  className={cn(
+                                    "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors",
+                                    isSelected ? "border-[5px] border-[#2563EB]" : "border-[1.5px] border-[#E5E7EB]",
+                                  )}
+                                />
+                                <span className="min-w-0">
+                                  <span className="block text-[14px] font-medium text-[#111111]">{option.title}</span>
+                                  <span className="mt-1 block text-[13px] leading-[1.5] text-[#6B7280]">
+                                    {option.description}
+                                  </span>
+                                </span>
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+
+            {payment?.needsReview ? (
               <div className="rounded-[18px] border border-[var(--payments-soft-blue-border)] bg-[var(--payments-soft-blue-panel)] px-4 py-3 text-[13px] font-medium leading-6 text-[var(--accent-blue)]">
                 Al guardar, este pago dejará de aparecer como pendiente de procesar.
               </div>
@@ -888,7 +1062,8 @@ function PaymentEditDialog({
 }
 
 export function PaymentsHistoryScreen() {
-  const { isAuthenticated, isLoading, logout } = useAuth();
+  const { isAuthenticated, isLoading, logout, user } = useAuth();
+  const { showError, showInfo, showSuccess } = useToast();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -902,14 +1077,12 @@ export function PaymentsHistoryScreen() {
   const [paymentsError, setPaymentsError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [isImportingExcel, setIsImportingExcel] = useState(false);
-  const [importFeedback, setImportFeedback] = useState<string | null>(null);
-  const [paymentFeedback, setPaymentFeedback] = useState<string | null>(null);
-  const [paymentFeedbackTone, setPaymentFeedbackTone] = useState<"success" | "warning" | null>(null);
-  const [period, setPeriod] = useState<"Mensual" | "Anual" | "Personalizado">("Mensual");
+  const [period, setPeriod] = useState<PeriodSelection>("Mensual");
   const [selectedMonth, setSelectedMonth] = useState<string>(defaultPeriodSelection.month);
   const [selectedYear, setSelectedYear] = useState<string>(defaultPeriodSelection.year);
   const [customStartDate, setCustomStartDate] = useState(defaultCustomDateRange.startDate);
   const [customEndDate, setCustomEndDate] = useState(defaultCustomDateRange.endDate);
+  const [hasLoadedPeriodPreferences, setHasLoadedPeriodPreferences] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(ALL_CATEGORIES_LABEL);
   const [selectedBusiness, setSelectedBusiness] = useState(ALL_BUSINESSES_LABEL);
   const [minAmount, setMinAmount] = useState("");
@@ -919,6 +1092,7 @@ export function PaymentsHistoryScreen() {
   const [rowsPerPage, setRowsPerPage] = useState<(typeof rowsPerPageOptions)[number]>(6);
   const [currentPage, setCurrentPage] = useState(1);
   const [categories, setCategories] = useState<CategoryDto[]>([]);
+  const [currentUserProfile, setCurrentUserProfile] = useState<UserDto | null>(null);
   const [availableBusinessValues, setAvailableBusinessValues] = useState<string[]>([]);
   const [selectedPayment, setSelectedPayment] = useState<PaymentDto | null>(null);
   const [paymentEditForm, setPaymentEditForm] = useState<PaymentEditForm | null>(null);
@@ -970,11 +1144,97 @@ export function PaymentsHistoryScreen() {
     value: index + 1,
   }));
 
+  const drawerUserName = getUserDisplayName(user?.displayName, user?.email, currentUserProfile);
+  const drawerUserPhotoUrl = currentUserProfile?.profilePhotoUrl || user?.photoURL || null;
+  const drawerUserSubtitle = currentUserProfile?.email || user?.email || "Cuenta activa";
+  const drawerUserInitials = getUserInitials(drawerUserName);
+
+  useEffect(() => {
+    if (!categoriesError) {
+      return;
+    }
+
+    showError(categoriesError);
+  }, [categoriesError, showError]);
+
+  useEffect(() => {
+    if (!paymentsError) {
+      return;
+    }
+
+    showError(paymentsError);
+  }, [paymentsError, showError]);
+
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       router.replace("/");
     }
   }, [isAuthenticated, isLoading, router]);
+
+  useEffect(() => {
+    const storedPreferences = readStoredPeriodPreferences();
+
+    if (storedPreferences) {
+      if (selectableMonthOptions.includes(storedPreferences.selectedMonth)) {
+        setSelectedMonth(storedPreferences.selectedMonth);
+      }
+
+      if (selectableYearOptions.includes(storedPreferences.selectedYear)) {
+        setSelectedYear(storedPreferences.selectedYear);
+      }
+
+      setPeriod(storedPreferences.period);
+    }
+
+    setHasLoadedPeriodPreferences(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedPeriodPreferences || typeof window === "undefined") {
+      return;
+    }
+
+    const nextPreferences: StoredPeriodPreferences = {
+      period,
+      selectedMonth,
+      selectedYear,
+    };
+
+    window.localStorage.setItem(PERIOD_PREFERENCES_STORAGE_KEY, JSON.stringify(nextPreferences));
+  }, [hasLoadedPeriodPreferences, period, selectedMonth, selectedYear]);
+
+  useEffect(() => {
+    if (isLoading || !isAuthenticated) {
+      setCurrentUserProfile(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadCurrentUser = async () => {
+      try {
+        const nextUserProfile = await userService.findMe();
+
+        if (cancelled) {
+          return;
+        }
+
+        setCurrentUserProfile(nextUserProfile);
+      } catch {
+        if (cancelled) {
+          return;
+        }
+
+        setCurrentUserProfile(null);
+      }
+    };
+
+    void loadCurrentUser();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, isLoading, user?.uid]);
 
   useEffect(() => {
     if (isLoading || !isAuthenticated) {
@@ -1051,6 +1311,10 @@ export function PaymentsHistoryScreen() {
   const isInitialPaymentsLoad = isPaymentsLoading && !hasResolvedPayments;
 
   useEffect(() => {
+    if (!hasLoadedPeriodPreferences) {
+      return;
+    }
+
     if (isLoading || !isAuthenticated) {
       return;
     }
@@ -1150,6 +1414,7 @@ export function PaymentsHistoryScreen() {
     };
   }, [
     currentPage,
+    hasLoadedPeriodPreferences,
     isAuthenticated,
     isLoading,
     maxAmount,
@@ -1231,7 +1496,6 @@ export function PaymentsHistoryScreen() {
   };
 
   const handleExcelButtonClick = () => {
-    setImportFeedback(null);
     fileInputRef.current?.click();
   };
 
@@ -1243,7 +1507,6 @@ export function PaymentsHistoryScreen() {
     }
 
     setIsImportingExcel(true);
-    setImportFeedback(null);
 
     try {
       const importedPayments = await bankService.extractPayments(selectedFile);
@@ -1252,9 +1515,9 @@ export function PaymentsHistoryScreen() {
       setSelectedCategory(ALL_CATEGORIES_LABEL);
       setSelectedBusiness(ALL_BUSINESSES_LABEL);
       setReloadKey((value) => value + 1);
-      setImportFeedback(`Importación completada: ${importedPayments.length} pagos guardados.`);
+      showSuccess(`Importación completada: ${importedPayments.length} pagos guardados.`);
     } catch (error) {
-      setImportFeedback(normalizeImportMessage(error));
+      showError(normalizeImportMessage(error));
     } finally {
       event.target.value = "";
       setIsImportingExcel(false);
@@ -1279,8 +1542,13 @@ export function PaymentsHistoryScreen() {
     setSelectedPayment(payment);
     setPaymentEditForm(createPaymentEditForm(payment));
     setPaymentEditError(null);
-    setPaymentFeedback(null);
-    setPaymentFeedbackTone(null);
+    setIsEditDialogOpen(true);
+  };
+
+  const handleNewPayment = () => {
+    setSelectedPayment(null);
+    setPaymentEditForm(createEmptyPaymentEditForm());
+    setPaymentEditError(null);
     setIsEditDialogOpen(true);
   };
 
@@ -1354,7 +1622,7 @@ export function PaymentsHistoryScreen() {
   };
 
   const handlePaymentSave = async () => {
-    if (!selectedPayment || !paymentEditForm) {
+    if (!paymentEditForm) {
       return;
     }
 
@@ -1362,6 +1630,24 @@ export function PaymentsHistoryScreen() {
 
     if (validationError) {
       setPaymentEditError(validationError);
+      return;
+    }
+
+    if (!selectedPayment) {
+      setIsSavingPayment(true);
+      setPaymentEditError(null);
+
+      try {
+        await paymentsService.createPayment(buildCreatePaymentPayload(paymentEditForm));
+        setReloadKey((value) => value + 1);
+        showSuccess("Pago creado correctamente.");
+        handleEditDialogOpenChange(false);
+      } catch (error) {
+        setPaymentEditError(normalizePaymentsMessage(error));
+      } finally {
+        setIsSavingPayment(false);
+      }
+
       return;
     }
 
@@ -1400,14 +1686,15 @@ export function PaymentsHistoryScreen() {
         currentPayments.map((payment) => successfulPaymentsById.get(payment.id) ?? payment),
       );
       setReloadKey((value) => value + 1);
-      setPaymentFeedback(
-        failedUpdates.length > 0
-          ? `Se actualizaron ${successfulUpdates.length} pagos, pero ${failedUpdates.length} no se pudieron guardar.`
-          : successfulUpdates.length === 1
+      if (failedUpdates.length > 0) {
+        showInfo(`Se actualizaron ${successfulUpdates.length} pagos, pero ${failedUpdates.length} no se pudieron guardar.`);
+      } else {
+        showSuccess(
+          successfulUpdates.length === 1
             ? "Pago actualizado correctamente."
             : `Se actualizaron ${successfulUpdates.length} pagos correctamente.`,
-      );
-      setPaymentFeedbackTone(failedUpdates.length > 0 ? "warning" : "success");
+        );
+      }
       handleEditDialogOpenChange(false);
     } catch (error) {
       setPaymentEditError(normalizePaymentsMessage(error));
@@ -1433,12 +1720,23 @@ export function PaymentsHistoryScreen() {
       <div className="relative flex min-h-screen w-full flex-col bg-[var(--bg-page)] xl:flex-row">
         <aside className="flex w-full shrink-0 flex-col gap-5 bg-[linear-gradient(180deg,var(--payments-drawer-start)_0%,var(--payments-drawer-end)_100%)] px-6 py-7 text-[var(--white)] xl:fixed xl:inset-y-0 xl:left-0 xl:z-30 xl:h-screen xl:w-[284px] xl:overflow-y-auto">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[linear-gradient(135deg,var(--payments-brand-start)_0%,var(--payments-brand-end)_100%)] text-[20px] font-bold text-[var(--white)]">
-              L
-            </div>
-            <div>
-              <p className="text-[18px] font-bold">Lizy finance</p>
-              <p className="text-[12px] font-medium text-[var(--payments-drawer-muted)]">Workspace overview</p>
+            {drawerUserPhotoUrl ? (
+              <div
+                aria-hidden="true"
+                className="h-11 w-11 shrink-0 rounded-[14px] bg-[var(--white-alpha-10)] bg-cover bg-center ring-1 ring-[var(--white-alpha-12)]"
+                style={{ backgroundImage: `url(${drawerUserPhotoUrl})` }}
+              />
+            ) : (
+              <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] border border-[var(--white-alpha-12)] bg-[var(--white-alpha-10)] text-[17px] font-bold text-[var(--white)] shadow-[0_14px_28px_var(--navy-alpha-18)]">
+                <span>{drawerUserInitials.charAt(0)}</span>
+                <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-[8px] bg-[linear-gradient(135deg,var(--payments-brand-start)_0%,var(--payments-brand-end)_100%)] text-[10px] font-black text-[var(--white)] ring-2 ring-[var(--payments-drawer-end)]">
+                  L
+                </span>
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="truncate text-[17px] font-bold text-[var(--white)]">{drawerUserName}</p>
+              <p className="mt-0.5 truncate text-[12px] font-medium text-[var(--payments-drawer-muted)]">{drawerUserSubtitle}</p>
             </div>
           </div>
           <div className="space-y-5">
@@ -1495,7 +1793,11 @@ export function PaymentsHistoryScreen() {
                   ref={fileInputRef}
                   type="file"
                 />
-                <Button className="h-9 rounded-[8px] bg-[var(--bg-white)] px-3 text-[13px] font-semibold text-[var(--text-primary)] shadow-none ring-1 ring-[var(--border-color)] hover:bg-[var(--accent-blue-light)]">
+                <Button
+                  className="h-9 rounded-[8px] bg-[var(--bg-white)] px-3 text-[13px] font-semibold text-[var(--text-primary)] shadow-none ring-1 ring-[var(--border-color)] hover:bg-[var(--accent-blue-light)]"
+                  onClick={handleNewPayment}
+                  type="button"
+                >
                   <Plus className="h-4 w-4" />
                   Nuevo pago
                 </Button>
@@ -1510,32 +1812,6 @@ export function PaymentsHistoryScreen() {
                 </Button>
               </div>
             </div>
-            {importFeedback ? (
-              <p
-                className={cn(
-                  "text-[13px] font-medium",
-                  importFeedback.startsWith("Importación")
-                    ? "text-[var(--success-green)]"
-                    : "text-[var(--danger-red)]",
-                )}
-              >
-                {importFeedback}
-              </p>
-            ) : null}
-            {paymentFeedback ? (
-              <p
-                className={cn(
-                  "text-[13px] font-medium",
-                  paymentFeedbackTone === "warning"
-                    ? "text-[var(--cat-restaurant)]"
-                    : "text-[var(--success-green)]",
-                )}
-              >
-                {paymentFeedback}
-              </p>
-            ) : null}
-            {categoriesError ? <p className="text-[13px] font-medium text-[var(--danger-red)]">{categoriesError}</p> : null}
-            {paymentsError ? <p className="text-[13px] font-medium text-[var(--danger-red)]">{paymentsError}</p> : null}
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex items-center gap-3">
@@ -1603,7 +1879,7 @@ export function PaymentsHistoryScreen() {
               <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                 <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                    <SelectField
+                    <SearchableSelectField
                       icon={Tag}
                       label="Categoría"
                       onChange={handleCategoryChange}

@@ -68,7 +68,7 @@ type AmountRangeFieldProps = {
   className?: string;
 };
 
-type CreatableSelectFieldProps = {
+type SearchableSelectFieldProps = {
   icon: LucideIcon;
   label: string;
   value: string;
@@ -491,7 +491,7 @@ export function InputField({
   );
 }
 
-export function CreatableSelectField({
+export function SearchableSelectField({
   icon: Icon,
   label,
   value,
@@ -501,22 +501,33 @@ export function CreatableSelectField({
   className,
   placeholder = "Escribe para buscar",
   emptyMessage = "No hay opciones disponibles.",
-}: CreatableSelectFieldProps) {
+}: SearchableSelectFieldProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [open, setOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
-  const normalizedValue = normalizeSearchValue(value);
+  const [searchValue, setSearchValue] = useState(value);
+  const [hasTypedSinceOpen, setHasTypedSinceOpen] = useState(false);
+  const selectedOption = useMemo(() => getSelectedOption(options, value), [options, value]);
+  const displayValue = selectedOption?.label ?? value;
+  const normalizedSearchValue = open && hasTypedSinceOpen ? normalizeSearchValue(searchValue) : "";
+  const searchMatchesExistingOption = useMemo(() => options.some((option) => option.label === searchValue), [options, searchValue]);
   const filteredOptions = useMemo(() => {
-    if (!normalizedValue) {
+    if (!normalizedSearchValue || searchMatchesExistingOption) {
       return options;
     }
 
-    return options.filter((option) => normalizeSearchValue(option.label).includes(normalizedValue));
-  }, [normalizedValue, options]);
-  const hasExactMatch = options.some((option) => normalizeSearchValue(option.label) === normalizedValue);
-  const canCreateOption = Boolean(onCreateOption && value.trim() && !hasExactMatch);
+    return options.filter((option) => normalizeSearchValue(option.label).includes(normalizedSearchValue));
+  }, [normalizedSearchValue, options, searchMatchesExistingOption]);
+  const canCreateOption = Boolean(onCreateOption && hasTypedSinceOpen && searchValue.trim() && !searchMatchesExistingOption);
+
+  useEffect(() => {
+    if (!open) {
+      setSearchValue(displayValue);
+      setHasTypedSinceOpen(false);
+    }
+  }, [displayValue, open]);
 
   useEffect(() => {
     if (!open) {
@@ -525,6 +536,7 @@ export function CreatableSelectField({
 
     const handlePointerDown = (event: MouseEvent) => {
       if (!containerRef.current?.contains(event.target as Node)) {
+        setHasTypedSinceOpen(false);
         setOpen(false);
       }
     };
@@ -536,14 +548,26 @@ export function CreatableSelectField({
     };
   }, [open]);
 
+  const openDropdown = () => {
+    setSearchValue(displayValue);
+    setHasTypedSinceOpen(false);
+    setOpen(true);
+  };
+
   const handleSelectOption = (optionValue: string) => {
+    const nextOption = options.find((option) => String(option.value) === optionValue);
+
     onChange(optionValue);
+    setSearchValue(nextOption?.label ?? optionValue);
     setLocalError(null);
+    setHasTypedSinceOpen(false);
     setOpen(false);
   };
 
   const handleCreate = async () => {
-    if (!onCreateOption || !value.trim()) {
+    const trimmedSearchValue = searchValue.trim();
+
+    if (!onCreateOption || !trimmedSearchValue) {
       return;
     }
 
@@ -551,9 +575,12 @@ export function CreatableSelectField({
     setLocalError(null);
 
     try {
-      const createdOption = await onCreateOption(value.trim());
+      const createdOption = await onCreateOption(trimmedSearchValue);
+      const nextValue = createdOption ? String(createdOption.value) : trimmedSearchValue;
 
-      onChange(createdOption ? String(createdOption.value) : value.trim());
+      onChange(nextValue);
+      setSearchValue(createdOption?.label ?? trimmedSearchValue);
+      setHasTypedSinceOpen(false);
       setOpen(false);
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "No se pudo crear la categoría.");
@@ -569,21 +596,43 @@ export function CreatableSelectField({
         {label}
       </span>
       <div className="relative">
-        <div className="relative flex min-h-12 items-center gap-3 rounded-[14px] border border-[var(--border-color)] bg-[linear-gradient(180deg,var(--bg-white)_0%,var(--bg-light)_180%)] px-3 py-2 shadow-[0_10px_30px_var(--navy-alpha-03)] transition duration-200 hover:border-[var(--blue-200)] focus-within:border-[var(--accent-blue)] focus-within:shadow-[0_0_0_3px_var(--blue-alpha-25)]">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[var(--accent-blue-light)] text-[var(--accent-blue)] ring-1 ring-[var(--blue-100)]">
-            <Icon className="h-4 w-4" />
+        <div
+          className="relative flex min-h-12 items-center gap-3 rounded-[14px] border border-[var(--border-color)] bg-[linear-gradient(180deg,var(--bg-white)_0%,var(--bg-light)_180%)] px-3 py-2 shadow-[0_10px_30px_var(--navy-alpha-03)] transition duration-200 hover:border-[var(--blue-200)] focus-within:border-[var(--accent-blue)] focus-within:shadow-[0_0_0_3px_var(--blue-alpha-25)]"
+          onMouseDown={(event) => {
+            if (inputRef.current?.contains(event.target as Node)) {
+              return;
+            }
+
+            event.preventDefault();
+            openDropdown();
+          }}
+        >
+          <span className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-[10px] bg-[var(--accent-blue-light)] text-[var(--accent-blue)] ring-1 ring-[var(--blue-100)]">
+            {selectedOption?.iconName ? (
+              <IconifyIcon className="h-4 w-4" icon={selectedOption.iconName} />
+            ) : (
+              <Icon className="h-4 w-4" />
+            )}
           </span>
           <input
             aria-label={label}
             className="min-w-0 flex-1 bg-transparent text-[14px] font-semibold text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
             onChange={(event) => {
-              onChange(event.target.value);
+              setSearchValue(event.target.value);
               setLocalError(null);
+              setHasTypedSinceOpen(true);
               setOpen(true);
             }}
-            onFocus={() => setOpen(true)}
+            onFocus={() => {
+              setSearchValue(displayValue);
+              setHasTypedSinceOpen(false);
+              setOpen(true);
+              queueMicrotask(() => inputRef.current?.select());
+            }}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
+                setSearchValue(displayValue);
+                setHasTypedSinceOpen(false);
                 setOpen(false);
               }
 
@@ -595,12 +644,12 @@ export function CreatableSelectField({
             placeholder={placeholder}
             ref={inputRef}
             type="text"
-            value={value}
+            value={open ? searchValue : displayValue}
           />
           {isCreating ? (
             <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-[var(--accent-blue)]" />
           ) : (
-            <ChevronDown className={cn("h-4 w-4 shrink-0 text-[var(--text-muted)] transition-transform", open ? "rotate-180" : "")} />
+            <ChevronDown className={cn("h-4 w-4 shrink-0 cursor-pointer text-[var(--text-muted)] transition-transform", open ? "rotate-180" : "")} />
           )}
         </div>
 
@@ -633,7 +682,7 @@ export function CreatableSelectField({
                   <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[8px] bg-[var(--bg-white)] ring-1 ring-[var(--payments-soft-blue-border)]">
                     <Plus className="h-4 w-4" />
                   </span>
-                  <span className="min-w-0 break-words leading-5">Crear categoría &quot;{value.trim()}&quot;</span>
+                  <span className="min-w-0 break-words leading-5">Crear categoría &quot;{searchValue.trim()}&quot;</span>
                 </button>
               ) : null}
 
@@ -792,3 +841,5 @@ export function AmountRangeField({
     </div>
   );
 }
+
+export const CreatableSelectField = SearchableSelectField;
