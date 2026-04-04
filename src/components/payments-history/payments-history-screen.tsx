@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type ChangeEvent, type ReactNode } from "react";
+import { Icon as IconifyIcon } from "@iconify/react";
 import {
   Activity,
   ArrowDown,
@@ -14,6 +15,7 @@ import {
   CalendarCheck,
   CalendarDays,
   CalendarRange,
+  Check,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
@@ -38,28 +40,39 @@ import {
 import { useAuth } from "@/components/providers/auth-provider";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   AmountRangeField,
   CompactSelectField,
+  CreatableSelectField,
   DateField,
+  InputField,
   SelectField,
   type SelectFieldOption,
 } from "@/components/ui/select-field";
 import {
   fixedExpenses,
   mortgageSummary,
-  type PaymentEntry,
   rowsPerPageOptions,
   sidebarSections,
-  type PaymentCategoryTone,
   variableExpenses,
 } from "@/components/payments-history/payments-history-data";
 import { bankService, BankServiceError } from "@/services/bank.service";
+import { categoryService, CategoryServiceError, type CategoryDto } from "@/services/category.service";
 import {
   paymentsService,
   PaymentsServiceError,
   type PaymentDto,
+  type PaymentType,
   type PaymentSortField,
   type SortDirection,
+  type UpdatePaymentPayload,
 } from "@/services/payments.service";
 import { cn } from "@/lib/utils";
 
@@ -67,29 +80,6 @@ const euroFormatter = new Intl.NumberFormat("es-ES", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
-
-const categoryToneClasses: Record<PaymentCategoryTone, { badge: string; dot: string }> = {
-  office: {
-    badge: "bg-[var(--cat-office-bg)] text-[var(--cat-office)]",
-    dot: "bg-[var(--cat-office)]",
-  },
-  restaurant: {
-    badge: "bg-[var(--cat-restaurant-bg)] text-[var(--cat-restaurant)]",
-    dot: "bg-[var(--cat-restaurant)]",
-  },
-  services: {
-    badge: "bg-[var(--cat-stonks-bg)] text-[var(--cat-stonks)]",
-    dot: "bg-[var(--cat-stonks)]",
-  },
-  software: {
-    badge: "bg-[var(--cat-software-bg)] text-[var(--cat-software)]",
-    dot: "bg-[var(--cat-software)]",
-  },
-  transport: {
-    badge: "bg-[var(--cat-transport-bg)] text-[var(--cat-transport)]",
-    dot: "bg-[var(--cat-transport)]",
-  },
-};
 
 const fixedExpenseIconMap: Record<string, LucideIcon> = {
   Hipoteca: House,
@@ -149,14 +139,53 @@ const defaultSortDirectionByField: Record<PaymentSortField, SortDirection> = {
   operationType: "ASC",
   type: "ASC",
 };
+const paymentTypeOptions: SelectFieldOption[] = [
+  { label: "Importe", value: "ADD" },
+  { label: "Pago", value: "SUBTRACT" },
+];
+const currencyPattern = /^[A-Z]{3}$/;
+const amountEqualityThreshold = 0.000001;
 
-const paymentCategoryFallbacks: Record<PaymentCategoryTone, { label: string; keywords: string[] }> = {
-  office: { label: "Oficina", keywords: ["amazon", "papeler", "office", "material"] },
-  restaurant: { label: "Restaurantes", keywords: ["rest", "cafe", "bar", "uber eats", "glovo", "deliveroo"] },
-  services: { label: "Servicios", keywords: ["stripe", "tax", "seguro", "agency", "freelance", "service"] },
-  software: { label: "Software", keywords: ["notion", "google", "microsoft", "slack", "figma", "software"] },
-  transport: { label: "Transporte", keywords: ["uber", "metro", "renfe", "cabify", "bolt", "transport"] },
+type BulkUpdateScope = "same-business" | "same-business-and-amount";
+
+type PaymentEditForm = {
+  date: string;
+  description: string;
+  businessName: string;
+  type: PaymentType;
+  amount: string;
+  category: string;
+  currency: string;
+  updateAll: boolean;
+  bulkUpdateScope: BulkUpdateScope;
 };
+
+type PaymentRowEntry = {
+  amount: number;
+  business: string;
+  category: string;
+  categoryBadgeStyle: {
+    backgroundColor: string;
+    color: string;
+  };
+  categoryIconName?: string;
+  description: string;
+  direction: "incoming" | "outgoing";
+  displayDate: string;
+  id: string;
+  paymentTypeLabel: string;
+  periodMonth: string;
+  periodYear: string;
+  statusLabel?: string;
+};
+
+const defaultCategoryBadgeStyle = {
+  backgroundColor: "var(--bg-light)",
+  color: "var(--text-secondary)",
+};
+
+const sortCategoriesByName = (categories: CategoryDto[]) =>
+  [...categories].sort((left, right) => left.name.localeCompare(right.name, "es"));
 
 function normalizeImportMessage(error: unknown) {
   if (error instanceof BankServiceError) {
@@ -182,20 +211,16 @@ function normalizePaymentsMessage(error: unknown) {
   return "No se pudieron cargar los pagos.";
 }
 
-function getCategoryToneFromPayment(payment: {
-  businessName: string | null;
-  category: string | null;
-  type: "ADD" | "SUBTRACT";
-}): PaymentCategoryTone {
-  const source = `${payment.category || ""} ${payment.businessName || ""}`.toLowerCase();
-
-  for (const [tone, config] of Object.entries(paymentCategoryFallbacks) as [PaymentCategoryTone, (typeof paymentCategoryFallbacks)[PaymentCategoryTone]][]) {
-    if (config.keywords.some((keyword) => source.includes(keyword))) {
-      return tone;
-    }
+function normalizeCategoriesMessage(error: unknown) {
+  if (error instanceof CategoryServiceError) {
+    return error.problem?.detail || error.message;
   }
 
-  return payment.type === "ADD" ? "services" : "office";
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "No se pudieron cargar las categorías.";
 }
 
 function toDisplayDate(date: string) {
@@ -260,14 +285,27 @@ function getPaymentTypeLabel(type: "ADD" | "SUBTRACT") {
   return type === "ADD" ? "Importe" : "Pago";
 }
 
-function mapPaymentToEntry(payment: PaymentDto): PaymentEntry {
-  const categoryTone = getCategoryToneFromPayment(payment);
+function normalizeCategoryName(value: string | null | undefined) {
+  const trimmedValue = value?.trim();
+
+  return trimmedValue ? trimmedValue.toLowerCase() : null;
+}
+
+function mapPaymentToEntry(payment: PaymentDto, categoriesByName: Map<string, CategoryDto>): PaymentRowEntry {
+  const normalizedCategoryName = normalizeCategoryName(payment.category);
+  const matchingCategory = normalizedCategoryName ? categoriesByName.get(normalizedCategoryName) : null;
 
   return {
     amount: payment.amount,
     business: payment.businessName || (payment.type === "ADD" ? "Ingreso" : "Sin negocio"),
-    category: payment.category || paymentCategoryFallbacks[categoryTone].label,
-    categoryTone,
+    category: matchingCategory?.name ?? payment.category?.trim() ?? "Sin categoría",
+    categoryBadgeStyle: matchingCategory
+      ? {
+          backgroundColor: matchingCategory.backgroundColor,
+          color: matchingCategory.color,
+        }
+      : defaultCategoryBadgeStyle,
+    categoryIconName: matchingCategory?.iconName,
     description: payment.description || (payment.type === "ADD" ? "Ingreso registrado" : "Movimiento registrado"),
     direction: payment.type === "ADD" ? "incoming" : "outgoing",
     displayDate: toDisplayDate(payment.date),
@@ -277,6 +315,90 @@ function mapPaymentToEntry(payment: PaymentDto): PaymentEntry {
     periodYear: payment.date.slice(0, 4),
     statusLabel: payment.needsReview ? "Pendiente de procesar" : undefined,
   };
+}
+
+function createPaymentEditForm(payment: PaymentDto): PaymentEditForm {
+  return {
+    amount: String(payment.amount),
+    bulkUpdateScope: "same-business",
+    businessName: payment.businessName ?? "",
+    category: payment.category ?? "",
+    currency: payment.currency ?? "",
+    date: payment.date,
+    description: payment.description ?? "",
+    type: payment.type,
+    updateAll: false,
+  };
+}
+
+function normalizeOptionalText(value: string) {
+  const trimmedValue = value.trim();
+
+  return trimmedValue ? trimmedValue : null;
+}
+
+function normalizeCurrency(value: string) {
+  return value.trim().toUpperCase();
+}
+
+function validatePaymentEditForm(form: PaymentEditForm) {
+  if (!form.date) {
+    return "Debes indicar una fecha.";
+  }
+
+  const amount = Number(form.amount);
+
+  if (!form.amount || Number.isNaN(amount) || amount < 0) {
+    return "El importe debe ser un número válido mayor o igual a 0.";
+  }
+
+  const currency = normalizeCurrency(form.currency);
+
+  if (currency && !currencyPattern.test(currency)) {
+    return "La moneda debe usar un código ISO de 3 letras, por ejemplo EUR.";
+  }
+
+  return null;
+}
+
+function buildPaymentUpdatePayload(payment: PaymentDto, form: PaymentEditForm): UpdatePaymentPayload {
+  const payload: UpdatePaymentPayload = {};
+  const normalizedDescription = normalizeOptionalText(form.description);
+  const normalizedBusinessName = normalizeOptionalText(form.businessName);
+  const normalizedCategory = normalizeOptionalText(form.category);
+  const normalizedCurrency = normalizeCurrency(form.currency);
+  const nextCurrency = normalizedCurrency ? normalizedCurrency : null;
+  const nextAmount = Number(form.amount);
+
+  if (form.date !== payment.date) {
+    payload.date = form.date;
+  }
+
+  if (normalizedDescription !== payment.description) {
+    payload.description = normalizedDescription;
+  }
+
+  if (normalizedBusinessName !== payment.businessName) {
+    payload.businessName = normalizedBusinessName;
+  }
+
+  if (form.type !== payment.type) {
+    payload.type = form.type;
+  }
+
+  if (Math.abs(nextAmount - payment.amount) > amountEqualityThreshold) {
+    payload.amount = nextAmount;
+  }
+
+  if (normalizedCategory !== payment.category) {
+    payload.category = normalizedCategory;
+  }
+
+  if (nextCurrency !== payment.currency) {
+    payload.currency = nextCurrency;
+  }
+
+  return payload;
 }
 
 function formatEuroAmount(amount: number) {
@@ -327,20 +449,25 @@ function SectionTitle({ children }: { children: ReactNode }) {
 }
 
 function PaymentCategoryBadge({
+  backgroundColor,
+  color,
+  iconName,
   label,
-  tone,
+  showDot = true,
 }: {
+  backgroundColor: string;
+  color: string;
+  iconName?: string;
   label: string;
-  tone: PaymentCategoryTone;
+  showDot?: boolean;
 }) {
   return (
     <span
-      className={cn(
-        "inline-flex h-[26px] items-center gap-2 rounded-full px-2.5 text-[12px] font-medium",
-        categoryToneClasses[tone].badge,
-      )}
+      className="inline-flex h-[26px] items-center gap-2 whitespace-nowrap rounded-full px-2.5 text-[12px] font-medium"
+      style={{ backgroundColor, color }}
     >
-      <span className={cn("h-[7px] w-[7px] rounded-full", categoryToneClasses[tone].dot)} />
+      {iconName ? <IconifyIcon className="h-[13px] w-[13px] shrink-0" icon={iconName} /> : null}
+      {showDot ? <span className="h-[7px] w-[7px] rounded-full" style={{ backgroundColor: color }} /> : null}
       {label}
     </span>
   );
@@ -444,25 +571,36 @@ function MobilePaymentCard({
   amount,
   business,
   category,
-  categoryTone,
+  categoryBadgeStyle,
+  categoryIconName,
   description,
   displayDate,
   direction,
+  onClick,
   paymentTypeLabel,
   statusLabel,
 }: {
   amount: number;
   business: string;
   category: string;
-  categoryTone: PaymentCategoryTone;
+  categoryBadgeStyle: {
+    backgroundColor: string;
+    color: string;
+  };
+  categoryIconName?: string;
   description: string;
   displayDate: string;
   direction: "incoming" | "outgoing";
+  onClick: () => void;
   paymentTypeLabel?: string;
   statusLabel?: string;
 }) {
   return (
-    <article className="rounded-[18px] border border-[var(--border-color)] bg-[var(--bg-white)] p-4 shadow-[0_18px_30px_var(--navy-alpha-03)]">
+    <button
+      className="rounded-[18px] border border-[var(--border-color)] bg-[var(--bg-white)] p-4 text-left shadow-[0_18px_30px_var(--navy-alpha-03)] transition duration-200 hover:border-[var(--blue-200)] hover:shadow-[0_22px_36px_var(--navy-alpha-08)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_var(--blue-alpha-25)]"
+      onClick={onClick}
+      type="button"
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-[12px] font-medium text-[var(--text-secondary)]">{displayDate}</p>
@@ -482,11 +620,270 @@ function MobilePaymentCard({
         <p>{description}</p>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <PaymentCategoryBadge label={category} tone={categoryTone} />
+        <PaymentCategoryBadge
+          backgroundColor={categoryBadgeStyle.backgroundColor}
+          color={categoryBadgeStyle.color}
+          iconName={categoryIconName}
+          label={category}
+        />
         <PaymentTypeBadge direction={direction} label={paymentTypeLabel ?? getPaymentTypeLabel(direction === "incoming" ? "ADD" : "SUBTRACT")} />
         {statusLabel ? <ReviewStatusBadge label={statusLabel} /> : null}
       </div>
-    </article>
+    </button>
+  );
+}
+
+function PaymentEditDialog({
+  categoriesByName,
+  categoryOptions,
+  open,
+  payment,
+  form,
+  error,
+  isSaving,
+  onCreateCategory,
+  onFieldChange,
+  onBulkScopeChange,
+  onOpenChange,
+  onSubmit,
+  onToggleUpdateAll,
+}: {
+  categoriesByName: Map<string, CategoryDto>;
+  categoryOptions: SelectFieldOption[];
+  open: boolean;
+  payment: PaymentDto | null;
+  form: PaymentEditForm | null;
+  error: string | null;
+  isSaving: boolean;
+  onCreateCategory: (name: string) => Promise<SelectFieldOption | void>;
+  onFieldChange: <Key extends keyof PaymentEditForm>(field: Key, value: PaymentEditForm[Key]) => void;
+  onBulkScopeChange: (value: BulkUpdateScope) => void;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: () => void;
+  onToggleUpdateAll: () => void;
+}) {
+  const canBulkUpdate = Boolean(payment?.businessName?.trim());
+  const paymentEntry = payment ? mapPaymentToEntry(payment, categoriesByName) : null;
+  const currentBusinessName = payment?.businessName?.trim() || "Sin negocio";
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent className="max-h-[90vh] max-w-[760px] overflow-y-auto rounded-[28px] border border-[var(--border-color)] bg-[var(--bg-white)] p-0 shadow-[0_30px_80px_var(--navy-alpha-20)]">
+        {payment && form ? (
+          <div className="space-y-6 p-6 sm:p-7">
+            <DialogHeader className="space-y-2 text-left">
+              <DialogTitle className="text-[24px] font-bold tracking-[-0.03em] text-[var(--text-primary)]">
+                Editar pago
+              </DialogTitle>
+              <DialogDescription className="text-[14px] leading-6 text-[var(--text-secondary)]">
+                Ajusta los datos del movimiento y decide si quieres propagar los cambios al resto de pagos con el mismo negocio.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="rounded-[24px] border border-[var(--payments-soft-blue-border)] bg-[linear-gradient(135deg,var(--payments-soft-blue-panel)_0%,var(--bg-white)_100%)] p-5 shadow-[0_18px_40px_var(--navy-alpha-03)]">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                    Pago seleccionado
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] bg-[var(--payments-soft-blue-icon)] text-[var(--accent-blue)] ring-1 ring-[var(--payments-soft-blue-border)]">
+                      <Building2 className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-[18px] font-bold tracking-[-0.02em] text-[var(--text-primary)]">
+                        {currentBusinessName}
+                      </p>
+                      <p className="mt-1 text-[13px] text-[var(--text-secondary)]">
+                        ID {payment.id.slice(0, 8)} · {paymentEntry?.displayDate}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                  {paymentEntry ? (
+                    <>
+                      <PaymentTypeBadge
+                        direction={paymentEntry.direction}
+                        label={paymentEntry.paymentTypeLabel ?? getPaymentTypeLabel(payment.type)}
+                      />
+                      <span className="inline-flex h-[26px] items-center rounded-full border border-[var(--border-color)] bg-[var(--bg-white)] px-3 text-[12px] font-semibold text-[var(--text-primary)]">
+                        {formatSignedAmount(payment.amount, paymentEntry.direction)}
+                      </span>
+                      <PaymentCategoryBadge
+                        backgroundColor={paymentEntry.categoryBadgeStyle.backgroundColor}
+                        color={paymentEntry.categoryBadgeStyle.color}
+                        iconName={paymentEntry.categoryIconName}
+                        label={paymentEntry.category}
+                      />
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <DateField
+                className="sm:col-span-1"
+                icon={Calendar}
+                label="Fecha"
+                onChange={(value) => onFieldChange("date", value)}
+                value={form.date}
+              />
+              <SelectField
+                className="sm:col-span-1"
+                icon={Repeat2}
+                label="Tipo"
+                onChange={(value) => onFieldChange("type", value as PaymentType)}
+                options={paymentTypeOptions}
+                value={form.type}
+              />
+              <InputField
+                className="sm:col-span-1"
+                icon={Building2}
+                label="Negocio"
+                onChange={(value) => onFieldChange("businessName", value)}
+                placeholder="Mercadona"
+                value={form.businessName}
+              />
+              <CreatableSelectField
+                className="sm:col-span-1"
+                icon={Tag}
+                label="Categoría"
+                onCreateOption={onCreateCategory}
+                onChange={(value) => onFieldChange("category", value)}
+                options={categoryOptions}
+                placeholder="Busca o crea una categoría"
+                value={form.category}
+              />
+              <InputField
+                className="sm:col-span-1"
+                icon={BadgeEuro}
+                inputMode="decimal"
+                label="Importe"
+                min="0"
+                onChange={(value) => onFieldChange("amount", value)}
+                placeholder="0,00"
+                step="0.01"
+                type="number"
+                value={form.amount}
+              />
+              <InputField
+                className="sm:col-span-1"
+                icon={Wallet}
+                label="Moneda"
+                onChange={(value) => onFieldChange("currency", value.toUpperCase())}
+                placeholder="EUR"
+                value={form.currency}
+              />
+              <InputField
+                className="sm:col-span-2"
+                icon={FileText}
+                label="Descripción"
+                onChange={(value) => onFieldChange("description", value)}
+                placeholder="Compra supermercado"
+                value={form.description}
+              />
+            </div>
+
+            <div className="rounded-[22px] border border-[var(--payments-soft-blue-border)] bg-[var(--payments-soft-blue-panel)] p-4 shadow-[inset_0_1px_0_var(--white-alpha-70)]">
+              <button
+                className="flex w-full items-start gap-3 text-left"
+                disabled={!canBulkUpdate}
+                onClick={onToggleUpdateAll}
+                type="button"
+              >
+                <span
+                  className={cn(
+                    "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] border transition-colors",
+                    form.updateAll
+                      ? "border-[var(--accent-blue)] bg-[var(--accent-blue)] text-[var(--white)]"
+                      : "border-[var(--payments-soft-blue-border)] bg-[var(--bg-white)] text-transparent",
+                    !canBulkUpdate ? "opacity-40" : "",
+                  )}
+                >
+                  <Check className="h-3.5 w-3.5" />
+                </span>
+                <span className="space-y-1">
+                  <span className="block text-[14px] font-semibold text-[var(--text-primary)]">Actualizar todos</span>
+                  <span className="block text-[13px] leading-6 text-[var(--text-secondary)]">
+                    {canBulkUpdate
+                      ? `Usa el negocio actual "${payment.businessName}" como referencia para propagar los cambios.`
+                      : "Solo está disponible cuando el pago tiene un negocio informado."}
+                  </span>
+                </span>
+              </button>
+
+              {form.updateAll && canBulkUpdate ? (
+                <div className="mt-4 space-y-3 rounded-[18px] border border-[var(--payments-soft-blue-border)] bg-[var(--bg-white)] p-3 shadow-[0_12px_24px_var(--navy-alpha-03)]">
+                  <p className="text-[13px] font-medium leading-6 text-[var(--text-secondary)]">
+                    ¿Quieres aplicarlo a todos los pagos con ese negocio o solo a los que además comparten el importe actual?
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {([
+                      {
+                        description: "Propaga los cambios a todos los pagos con el mismo negocio.",
+                        title: "Mismo negocio",
+                        value: "same-business",
+                      },
+                      {
+                        description: "Solo afecta a pagos con el mismo negocio y el mismo importe actual.",
+                        title: "Mismo negocio e importe",
+                        value: "same-business-and-amount",
+                      },
+                    ] as const).map((option) => (
+                      <button
+                        className={cn(
+                          "rounded-[16px] border px-4 py-3 text-left transition-colors",
+                          form.bulkUpdateScope === option.value
+                            ? "border-[var(--payments-soft-blue-border)] bg-[var(--payments-soft-blue-panel)] shadow-[0_12px_24px_var(--navy-alpha-03)]"
+                            : "border-[var(--border-color)] bg-[var(--bg-white)] hover:border-[var(--blue-200)]",
+                        )}
+                        key={option.value}
+                        onClick={() => onBulkScopeChange(option.value)}
+                        type="button"
+                      >
+                        <span className="block text-[13px] font-semibold text-[var(--text-primary)]">{option.title}</span>
+                        <span className="mt-1 block text-[12px] leading-5 text-[var(--text-secondary)]">
+                          {option.description}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {payment.needsReview ? (
+              <div className="rounded-[18px] border border-[var(--payments-soft-blue-border)] bg-[var(--payments-soft-blue-panel)] px-4 py-3 text-[13px] font-medium leading-6 text-[var(--accent-blue)]">
+                Al guardar, este pago dejará de aparecer como pendiente de procesar.
+              </div>
+            ) : null}
+
+            {error ? <p className="text-[13px] font-medium text-[var(--danger-red)]">{error}</p> : null}
+
+            <DialogFooter className="gap-3 sm:justify-between">
+              <button
+                className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[var(--border-color)] bg-[var(--bg-white)] px-4 text-[14px] font-semibold text-[var(--text-secondary)] transition-colors hover:border-[var(--blue-200)] hover:text-[var(--text-primary)] disabled:opacity-50"
+                disabled={isSaving}
+                onClick={() => onOpenChange(false)}
+                type="button"
+              >
+                Cancelar
+              </button>
+              <button
+                className="inline-flex h-11 items-center justify-center rounded-[14px] bg-[var(--accent-blue)] px-5 text-[14px] font-semibold text-[var(--white)] shadow-[0_14px_32px_var(--blue-alpha-25)] transition-colors hover:bg-[var(--blue-600)] disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isSaving}
+                onClick={onSubmit}
+                type="button"
+              >
+                {isSaving ? "Guardando..." : "Guardar cambios"}
+              </button>
+            </DialogFooter>
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -495,7 +892,7 @@ export function PaymentsHistoryScreen() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [payments, setPayments] = useState<PaymentEntry[]>([]);
+  const [payments, setPayments] = useState<PaymentDto[]>([]);
   const [totalIncoming, setTotalIncoming] = useState(0);
   const [totalOutgoing, setTotalOutgoing] = useState(0);
   const [totalItems, setTotalItems] = useState(0);
@@ -506,6 +903,8 @@ export function PaymentsHistoryScreen() {
   const [reloadKey, setReloadKey] = useState(0);
   const [isImportingExcel, setIsImportingExcel] = useState(false);
   const [importFeedback, setImportFeedback] = useState<string | null>(null);
+  const [paymentFeedback, setPaymentFeedback] = useState<string | null>(null);
+  const [paymentFeedbackTone, setPaymentFeedbackTone] = useState<"success" | "warning" | null>(null);
   const [period, setPeriod] = useState<"Mensual" | "Anual" | "Personalizado">("Mensual");
   const [selectedMonth, setSelectedMonth] = useState<string>(defaultPeriodSelection.month);
   const [selectedYear, setSelectedYear] = useState<string>(defaultPeriodSelection.year);
@@ -519,15 +918,48 @@ export function PaymentsHistoryScreen() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("DESC");
   const [rowsPerPage, setRowsPerPage] = useState<(typeof rowsPerPageOptions)[number]>(6);
   const [currentPage, setCurrentPage] = useState(1);
-  const [availableCategoryValues, setAvailableCategoryValues] = useState<string[]>([]);
+  const [categories, setCategories] = useState<CategoryDto[]>([]);
   const [availableBusinessValues, setAvailableBusinessValues] = useState<string[]>([]);
+  const [selectedPayment, setSelectedPayment] = useState<PaymentDto | null>(null);
+  const [paymentEditForm, setPaymentEditForm] = useState<PaymentEditForm | null>(null);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isSavingPayment, setIsSavingPayment] = useState(false);
+  const [paymentEditError, setPaymentEditError] = useState<string | null>(null);
+  const [categoriesError, setCategoriesError] = useState<string | null>(null);
   const availableYearOptions = selectableYearOptions;
   const availableMonthOptions = selectableMonthOptions;
+  const categoriesByName = useMemo(
+    () =>
+      new Map(
+        categories
+          .map((category) => [normalizeCategoryName(category.name), category] as const)
+          .filter((entry): entry is [string, CategoryDto] => Boolean(entry[0])),
+      ),
+    [categories],
+  );
+  const availableCategoryValues = categories.map((category) => category.name);
   const availableCategoryOptions = [ALL_CATEGORIES_LABEL, ...availableCategoryValues];
   const availableBusinessOptions = [ALL_BUSINESSES_LABEL, ...availableBusinessValues];
+  const paymentRows = useMemo(
+    () => payments.map((payment) => ({ entry: mapPaymentToEntry(payment, categoriesByName), payment })),
+    [categoriesByName, payments],
+  );
   const monthSelectOptions: SelectFieldOption[] = availableMonthOptions.map((option) => ({ label: option, value: option }));
   const yearSelectOptions: SelectFieldOption[] = availableYearOptions.map((option) => ({ label: option, value: option }));
-  const categorySelectOptions: SelectFieldOption[] = availableCategoryOptions.map((option) => ({ label: option, value: option }));
+  const categoryFieldOptions: SelectFieldOption[] = categories.map((category) => ({
+    iconName: category.iconName,
+    label: category.name,
+    value: category.name,
+  }));
+  const categorySelectOptions: SelectFieldOption[] = availableCategoryOptions.map((option) => {
+    const matchingCategory = categories.find((category) => category.name === option);
+
+    return {
+      iconName: matchingCategory?.iconName,
+      label: option,
+      value: option,
+    };
+  });
   const businessSelectOptions: SelectFieldOption[] = availableBusinessOptions.map((option) => ({ label: option, value: option }));
   const rowsPerPageSelectOptions: SelectFieldOption[] = rowsPerPageOptions.map((option) => ({
     label: `${option} por página`,
@@ -543,6 +975,40 @@ export function PaymentsHistoryScreen() {
       router.replace("/");
     }
   }, [isAuthenticated, isLoading, router]);
+
+  useEffect(() => {
+    if (isLoading || !isAuthenticated) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadCategories = async () => {
+      try {
+        const nextCategories = await categoryService.listCategories();
+
+        if (cancelled) {
+          return;
+        }
+
+        setCategories(sortCategoriesByName(nextCategories));
+        setCategoriesError(null);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setCategories([]);
+        setCategoriesError(normalizeCategoriesMessage(error));
+      }
+    };
+
+    void loadCategories();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, isLoading, reloadKey]);
 
   useEffect(() => {
     if (!availableYearOptions.includes(selectedYear)) {
@@ -627,7 +1093,7 @@ export function PaymentsHistoryScreen() {
       setPaymentsError(null);
 
       try {
-        const [paymentsPage, summary, groupedCategories, groupedBusinesses] = await Promise.all([
+        const [paymentsPage, summary, groupedBusinesses] = await Promise.all([
           paymentsService.listPayments({
             business: businessFilter,
             category: categoryFilter,
@@ -641,7 +1107,6 @@ export function PaymentsHistoryScreen() {
             startDate,
           }),
           paymentsService.getSummary({ endDate, startDate }),
-          paymentsService.getGroupByCategory({ endDate, startDate }),
           paymentsService.getGroupByBusiness({ endDate, startDate }),
         ]);
 
@@ -649,10 +1114,9 @@ export function PaymentsHistoryScreen() {
           return;
         }
 
-        setPayments(paymentsPage.items.map(mapPaymentToEntry));
+        setPayments(paymentsPage.items);
         setTotalItems(paymentsPage.totalItems);
         setTotalPages(Math.max(1, paymentsPage.totalPages));
-        setAvailableCategoryValues(groupedCategories.map((group) => group.categoryName));
         setAvailableBusinessValues(groupedBusinesses.map((group) => group.businessName));
         setTotalIncoming(summary.find((entry) => entry.type === "ADD")?.totalAmount ?? 0);
         setTotalOutgoing(summary.find((entry) => entry.type === "SUBTRACT")?.totalAmount ?? 0);
@@ -797,6 +1261,161 @@ export function PaymentsHistoryScreen() {
     }
   };
 
+  const handleEditDialogOpenChange = (open: boolean) => {
+    if (!open && isSavingPayment) {
+      return;
+    }
+
+    setIsEditDialogOpen(open);
+
+    if (!open) {
+      setSelectedPayment(null);
+      setPaymentEditForm(null);
+      setPaymentEditError(null);
+    }
+  };
+
+  const handlePaymentSelect = (payment: PaymentDto) => {
+    setSelectedPayment(payment);
+    setPaymentEditForm(createPaymentEditForm(payment));
+    setPaymentEditError(null);
+    setPaymentFeedback(null);
+    setPaymentFeedbackTone(null);
+    setIsEditDialogOpen(true);
+  };
+
+  const handlePaymentFormChange = <Key extends keyof PaymentEditForm>(field: Key, value: PaymentEditForm[Key]) => {
+    setPaymentEditForm((currentForm) => (currentForm ? { ...currentForm, [field]: value } : currentForm));
+  };
+
+  const handleCreateCategory = async (name: string) => {
+    const createdCategory = await categoryService.createCategory({ name });
+
+    setCategories((currentCategories) => sortCategoriesByName([...currentCategories, createdCategory]));
+
+    return {
+      iconName: createdCategory.iconName,
+      label: createdCategory.name,
+      value: createdCategory.name,
+    } satisfies SelectFieldOption;
+  };
+
+  const handleBulkScopeChange = (value: BulkUpdateScope) => {
+    setPaymentEditForm((currentForm) => (currentForm ? { ...currentForm, bulkUpdateScope: value } : currentForm));
+  };
+
+  const handleToggleUpdateAll = () => {
+    if (!selectedPayment?.businessName?.trim()) {
+      return;
+    }
+
+    setPaymentEditForm((currentForm) =>
+      currentForm
+        ? {
+            ...currentForm,
+            updateAll: !currentForm.updateAll,
+          }
+        : currentForm,
+    );
+  };
+
+  const getBulkUpdateTargets = async (payment: PaymentDto, scope: BulkUpdateScope) => {
+    if (!payment.businessName?.trim()) {
+      throw new Error("Solo puedes actualizar varios pagos cuando el negocio está informado.");
+    }
+
+    const normalizedBusinessName = payment.businessName.trim().toLowerCase();
+    const candidatePayments = await paymentsService.listAllPayments({
+      business: payment.businessName,
+      direction: "DESC",
+      maxAmount: scope === "same-business-and-amount" ? payment.amount : undefined,
+      minAmount: scope === "same-business-and-amount" ? payment.amount : undefined,
+      size: 100,
+      sort: "date",
+    });
+    const matchingPayments = candidatePayments.filter((candidatePayment) => {
+      const hasSameBusinessName = candidatePayment.businessName?.trim().toLowerCase() === normalizedBusinessName;
+
+      if (!hasSameBusinessName) {
+        return false;
+      }
+
+      if (scope === "same-business-and-amount") {
+        return Math.abs(candidatePayment.amount - payment.amount) <= amountEqualityThreshold;
+      }
+
+      return true;
+    });
+    const uniquePayments = new Map(matchingPayments.map((candidatePayment) => [candidatePayment.id, candidatePayment]));
+
+    uniquePayments.set(payment.id, payment);
+
+    return [...uniquePayments.values()];
+  };
+
+  const handlePaymentSave = async () => {
+    if (!selectedPayment || !paymentEditForm) {
+      return;
+    }
+
+    const validationError = validatePaymentEditForm(paymentEditForm);
+
+    if (validationError) {
+      setPaymentEditError(validationError);
+      return;
+    }
+
+    const updatePayload = buildPaymentUpdatePayload(selectedPayment, paymentEditForm);
+
+    if (Object.keys(updatePayload).length === 0) {
+      setPaymentEditError("No hay cambios para guardar.");
+      return;
+    }
+
+    setIsSavingPayment(true);
+    setPaymentEditError(null);
+
+    try {
+      const targetPayments = paymentEditForm.updateAll
+        ? await getBulkUpdateTargets(selectedPayment, paymentEditForm.bulkUpdateScope)
+        : [selectedPayment];
+      const updateResults = await Promise.allSettled(
+        targetPayments.map((payment) =>
+          paymentsService.updatePayment(payment.id, {
+            ...updatePayload,
+            forAll: false,
+          }),
+        ),
+      );
+      const successfulUpdates = updateResults.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
+      const failedUpdates = updateResults.filter((result) => result.status === "rejected");
+
+      if (successfulUpdates.length === 0) {
+        throw failedUpdates[0]?.reason ?? new Error("No se pudo actualizar el pago.");
+      }
+
+      const successfulPaymentsById = new Map(successfulUpdates.map((payment) => [payment.id, payment]));
+
+      setPayments((currentPayments) =>
+        currentPayments.map((payment) => successfulPaymentsById.get(payment.id) ?? payment),
+      );
+      setReloadKey((value) => value + 1);
+      setPaymentFeedback(
+        failedUpdates.length > 0
+          ? `Se actualizaron ${successfulUpdates.length} pagos, pero ${failedUpdates.length} no se pudieron guardar.`
+          : successfulUpdates.length === 1
+            ? "Pago actualizado correctamente."
+            : `Se actualizaron ${successfulUpdates.length} pagos correctamente.`,
+      );
+      setPaymentFeedbackTone(failedUpdates.length > 0 ? "warning" : "success");
+      handleEditDialogOpenChange(false);
+    } catch (error) {
+      setPaymentEditError(normalizePaymentsMessage(error));
+    } finally {
+      setIsSavingPayment(false);
+    }
+  };
+
   if (isLoading || !isAuthenticated) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[var(--payments-page-background)] px-6 text-[var(--payments-shell-ink)]">
@@ -903,6 +1522,19 @@ export function PaymentsHistoryScreen() {
                 {importFeedback}
               </p>
             ) : null}
+            {paymentFeedback ? (
+              <p
+                className={cn(
+                  "text-[13px] font-medium",
+                  paymentFeedbackTone === "warning"
+                    ? "text-[var(--cat-restaurant)]"
+                    : "text-[var(--success-green)]",
+                )}
+              >
+                {paymentFeedback}
+              </p>
+            ) : null}
+            {categoriesError ? <p className="text-[13px] font-medium text-[var(--danger-red)]">{categoriesError}</p> : null}
             {paymentsError ? <p className="text-[13px] font-medium text-[var(--danger-red)]">{paymentsError}</p> : null}
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1037,7 +1669,7 @@ export function PaymentsHistoryScreen() {
                           onClick={() => handleSortChange("businessName")}
                         />
                       </th>
-                      <th className="w-[180px] px-5 py-4 text-[12px] font-semibold tracking-[0.04em] text-[var(--text-secondary)]">
+                      <th className="w-[240px] px-5 py-4 text-[12px] font-semibold tracking-[0.04em] text-[var(--text-secondary)]">
                         <SortableHeader
                           active={sortField === "category"}
                           direction={sortDirection}
@@ -1087,41 +1719,59 @@ export function PaymentsHistoryScreen() {
                         </td>
                       </tr>
                     ) : (
-                      payments.map((entry) => (
-                      <tr key={entry.id}>
-                        <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle text-[13px] text-[var(--text-primary)]">
-                          {entry.displayDate}
-                        </td>
-                        <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
-                          <div className="flex flex-col justify-center gap-1.5">
-                            <span className="text-[13px] font-medium text-[var(--text-primary)]">{entry.business}</span>
-                            <span className="flex items-center gap-1 text-[12px] text-[var(--text-secondary)]">
-                              <FileText className="h-3 w-3 text-[var(--text-muted)]" />
-                              {entry.description}
-                            </span>
-                            {entry.statusLabel ? <ReviewStatusBadge label={entry.statusLabel} /> : null}
-                          </div>
-                        </td>
-                        <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
-                          <PaymentCategoryBadge label={entry.category} tone={entry.categoryTone} />
-                        </td>
-                        <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
-                          <PaymentTypeBadge
-                            direction={entry.direction}
-                            label={entry.paymentTypeLabel ?? getPaymentTypeLabel(entry.direction === "incoming" ? "ADD" : "SUBTRACT")}
-                          />
-                        </td>
-                        <td
-                          className={cn(
-                            "border-t border-[var(--border-color)] px-5 py-4 text-right align-middle text-[13px] font-semibold tabular-nums",
-                            entry.direction === "incoming"
-                              ? "text-[var(--success-green)]"
-                              : "text-[var(--danger-red)]",
-                          )}
+                      paymentRows.map(({ entry, payment }) => (
+                        <tr
+                          className="cursor-pointer transition-colors hover:bg-[var(--accent-blue-light)]/45 focus-visible:outline-none"
+                          key={payment.id}
+                          onClick={() => handlePaymentSelect(payment)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              handlePaymentSelect(payment);
+                            }
+                          }}
+                          role="button"
+                          tabIndex={0}
                         >
-                          {formatSignedAmount(entry.amount, entry.direction)}
-                        </td>
-                      </tr>
+                          <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle text-[13px] text-[var(--text-primary)]">
+                            {entry.displayDate}
+                          </td>
+                          <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
+                            <div className="flex flex-col justify-center gap-1.5">
+                              <span className="text-[13px] font-medium text-[var(--text-primary)]">{entry.business}</span>
+                              <span className="flex items-center gap-1 text-[12px] text-[var(--text-secondary)]">
+                                <FileText className="h-3 w-3 text-[var(--text-muted)]" />
+                                {entry.description}
+                              </span>
+                              {entry.statusLabel ? <ReviewStatusBadge label={entry.statusLabel} /> : null}
+                            </div>
+                          </td>
+                          <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
+                            <PaymentCategoryBadge
+                              backgroundColor={entry.categoryBadgeStyle.backgroundColor}
+                              color={entry.categoryBadgeStyle.color}
+                              iconName={entry.categoryIconName}
+                              label={entry.category}
+                              showDot={!entry.categoryIconName}
+                            />
+                          </td>
+                          <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
+                            <PaymentTypeBadge
+                              direction={entry.direction}
+                              label={entry.paymentTypeLabel ?? getPaymentTypeLabel(entry.direction === "incoming" ? "ADD" : "SUBTRACT")}
+                            />
+                          </td>
+                          <td
+                            className={cn(
+                              "border-t border-[var(--border-color)] px-5 py-4 text-right align-middle text-[13px] font-semibold tabular-nums",
+                              entry.direction === "incoming"
+                                ? "text-[var(--success-green)]"
+                                : "text-[var(--danger-red)]",
+                            )}
+                          >
+                            {formatSignedAmount(entry.amount, entry.direction)}
+                          </td>
+                        </tr>
                       ))
                     )}
                   </tbody>
@@ -1137,16 +1787,18 @@ export function PaymentsHistoryScreen() {
                     No hay pagos para el rango seleccionado.
                   </div>
                 ) : (
-                  payments.map((entry) => (
+                  paymentRows.map(({ entry, payment }) => (
                     <MobilePaymentCard
                       amount={entry.amount}
                       business={entry.business}
                       category={entry.category}
-                      categoryTone={entry.categoryTone}
+                      categoryBadgeStyle={entry.categoryBadgeStyle}
+                      categoryIconName={entry.categoryIconName}
                       description={entry.description}
                       direction={entry.direction}
                       displayDate={entry.displayDate}
-                      key={entry.id}
+                      key={payment.id}
+                      onClick={() => handlePaymentSelect(payment)}
                       paymentTypeLabel={entry.paymentTypeLabel}
                       statusLabel={entry.statusLabel}
                     />
@@ -1310,6 +1962,21 @@ export function PaymentsHistoryScreen() {
           </div>
         </section>
       </div>
+      <PaymentEditDialog
+        categoriesByName={categoriesByName}
+        categoryOptions={categoryFieldOptions}
+        error={paymentEditError}
+        form={paymentEditForm}
+        isSaving={isSavingPayment}
+        onCreateCategory={handleCreateCategory}
+        onBulkScopeChange={handleBulkScopeChange}
+        onFieldChange={handlePaymentFormChange}
+        onOpenChange={handleEditDialogOpenChange}
+        onSubmit={handlePaymentSave}
+        onToggleUpdateAll={handleToggleUpdateAll}
+        open={isEditDialogOpen}
+        payment={selectedPayment}
+      />
     </main>
   );
 }

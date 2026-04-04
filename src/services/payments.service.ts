@@ -407,6 +407,27 @@ class PaymentsService {
     return result;
   }
 
+  async listAllPayments(params: Omit<ListPaymentsParams, "page"> = {}) {
+    const size = params.size ?? 100;
+    const firstPage = await this.listPayments({ ...params, page: 0, size });
+
+    if (firstPage.totalPages <= 1) {
+      return firstPage.items;
+    }
+
+    const remainingPages = await Promise.all(
+      Array.from({ length: firstPage.totalPages - 1 }, (_, index) =>
+        this.listPayments({
+          ...params,
+          page: index + 1,
+          size,
+        }),
+      ),
+    );
+
+    return [firstPage, ...remainingPages].flatMap((page) => page.items);
+  }
+
   async getSummary(params?: SummaryParams) {
     const summary = await this.request<PaymentsSummaryDto[]>("/summary", { method: "GET" }, buildSummaryQueryParams(params));
 
