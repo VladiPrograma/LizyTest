@@ -950,16 +950,16 @@ function PaymentEditDialog({
             </div>
 
             {!isCreateMode ? (
-              <section className="overflow-hidden rounded-[16px] border border-[#E5E7EB] bg-[var(--bg-white)] shadow-[0_20px_45px_rgba(15,23,42,0.06)]">
+              <section className="overflow-hidden rounded-[16px] border border-[var(--border-color)] bg-[var(--bg-white)] shadow-[0_20px_45px_var(--navy-alpha-08)]">
                 <div className="flex flex-col gap-5 px-7 pb-7 pt-7 sm:flex-row sm:items-start sm:justify-between sm:px-8">
                   <div className="min-w-0">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#6B7280]">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
                       ACTUALIZACION MASIVA
                     </p>
-                    <h3 className="mt-2 text-[20px] font-bold tracking-[-0.02em] text-[#111111]">
+                    <h3 className="mt-2 text-[20px] font-bold tracking-[-0.02em] text-[var(--text-primary)]">
                       Actualizar todos los pagos relacionados
                     </h3>
-                    <p className="mt-2 max-w-[440px] text-[14px] leading-[1.5] text-[#6B7280]">
+                    <p className="mt-2 max-w-[440px] text-[14px] leading-[1.5] text-[var(--text-secondary)]">
                       {canBulkUpdate
                         ? `Se aplicara usando "${currentBusinessName}" como referencia principal.`
                         : "Necesitas indicar un negocio en este pago para poder usar esta actualizacion masiva."}
@@ -970,7 +970,9 @@ function PaymentEditDialog({
                     aria-pressed={form.updateAll}
                     className={cn(
                       "flex h-[26px] w-[48px] shrink-0 items-center rounded-full p-[3px] transition-colors focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_var(--blue-alpha-25)]",
-                      form.updateAll && canBulkUpdate ? "justify-end bg-[#2563EB]" : "justify-start bg-[#E5E7EB]",
+                      form.updateAll && canBulkUpdate
+                        ? "justify-end bg-[var(--accent-blue)]"
+                        : "justify-start bg-[var(--border-color)]",
                       !canBulkUpdate ? "cursor-not-allowed opacity-60" : "cursor-pointer",
                     )}
                     disabled={!canBulkUpdate}
@@ -983,10 +985,10 @@ function PaymentEditDialog({
 
                 {form.updateAll && canBulkUpdate ? (
                   <div className="px-7 pb-6 pt-6 sm:px-8">
-                    <div className="h-px bg-[#F3F4F6]" />
+                    <div className="h-px bg-[var(--cloud-100)]" />
                     <div className="pt-6">
-                      <p className="text-[15px] font-semibold text-[#111111]">Alcance de la actualizacion</p>
-                      <p className="mt-2 max-w-[470px] text-[13px] leading-[1.5] text-[#6B7280]">
+                      <p className="text-[15px] font-semibold text-[var(--text-primary)]">Alcance de la actualizacion</p>
+                      <p className="mt-2 max-w-[470px] text-[13px] leading-[1.5] text-[var(--text-secondary)]">
                         Elige como localizar los pagos que se actualizaran automaticamente.
                       </p>
                       <div aria-label="Alcance de la actualizacion" className="mt-5" role="radiogroup">
@@ -995,7 +997,7 @@ function PaymentEditDialog({
 
                           return (
                             <div
-                              className={cn(optionIndex > 0 ? "border-t border-[#F3F4F6]" : "")}
+                              className={cn(optionIndex > 0 ? "border-t border-[var(--cloud-100)]" : "")}
                               key={option.value}
                             >
                               <button
@@ -1008,12 +1010,14 @@ function PaymentEditDialog({
                                 <span
                                   className={cn(
                                     "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors",
-                                    isSelected ? "border-[5px] border-[#2563EB]" : "border-[1.5px] border-[#E5E7EB]",
+                                    isSelected
+                                      ? "border-[5px] border-[var(--accent-blue)]"
+                                      : "border-[1.5px] border-[var(--border-color)]",
                                   )}
                                 />
                                 <span className="min-w-0">
-                                  <span className="block text-[14px] font-medium text-[#111111]">{option.title}</span>
-                                  <span className="mt-1 block text-[13px] leading-[1.5] text-[#6B7280]">
+                                  <span className="block text-[14px] font-medium text-[var(--text-primary)]">{option.title}</span>
+                                  <span className="mt-1 block text-[13px] leading-[1.5] text-[var(--text-secondary)]">
                                     {option.description}
                                   </span>
                                 </span>

@@ -176,7 +176,11 @@
 
 
   --danger-red: var(--red-600);
+  --danger-red-border: #fecaca;
+  --danger-red-soft: #fef2f2;
   --success-green: var(--green-600);
+  --success-green-border: #bbf7d0;
+  --success-green-soft: #ecfdf3;
   --text-muted: var(--slate-400);
   --text-primary: var(--neutral-950);
   --text-secondary: var(--slate-500);

@@ -35,17 +35,17 @@ const toastVariantStyles: Record<
 > = {
   error: {
     icon: CircleAlert,
-    iconClassName: "border-[#FECACA] bg-[#FEF2F2] text-[#DC2626]",
+    iconClassName: "border-[var(--danger-red-border)] bg-[var(--danger-red-soft)] text-[var(--danger-red)]",
     role: "alert",
   },
   info: {
     icon: Info,
-    iconClassName: "border-[#BFDBFE] bg-[#EFF6FF] text-[#2563EB]",
+    iconClassName: "border-[var(--payments-soft-blue-border)] bg-[var(--accent-blue-light)] text-[var(--accent-blue)]",
     role: "status",
   },
   success: {
     icon: CircleCheckBig,
-    iconClassName: "border-[#BBF7D0] bg-[#ECFDF3] text-[#16A34A]",
+    iconClassName: "border-[var(--success-green-border)] bg-[var(--success-green-soft)] text-[var(--success-green)]",
     role: "status",
   },
 };
