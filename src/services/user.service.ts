@@ -21,6 +21,7 @@ export type UserDto = {
 };
 
 export type CreateUserPayload = {
+  name: string;
   country: string;
   city: string;
   currency: string;
@@ -108,6 +109,7 @@ const ensureNonEmpty = (fieldName: string, value: string) => {
 };
 
 const validateCreatePayload = (payload: CreateUserPayload) => {
+  ensureNonEmpty("name", payload.name);
   ensureNonEmpty("country", payload.country);
   ensureNonEmpty("city", payload.city);
   ensureNonEmpty("currency", payload.currency);

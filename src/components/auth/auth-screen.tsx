@@ -97,6 +97,7 @@ const getInitialOnboardingState = (): OnboardingState => {
       country: "",
       currency: "",
       locale: "en-US",
+      name: "",
       timeZone: "UTC",
     };
   }
@@ -111,6 +112,7 @@ const getInitialOnboardingState = (): OnboardingState => {
     country: getCountryFromLocale(locale),
     currency: regionCurrencyMap[region] || "",
     locale,
+    name: "",
     timeZone,
   };
 };
@@ -255,12 +257,15 @@ export function AuthScreen() {
           return;
         }
 
+        const resolvedName = form.firstName.trim() || user.displayName?.trim() || "";
+
         setOnboardingForm((current) => ({
           ...getInitialOnboardingState(),
           birthDate: current.birthDate,
           city: current.city,
           country: current.country || getInitialOnboardingState().country,
           currency: current.currency || getInitialOnboardingState().currency,
+          name: current.name.trim() || resolvedName,
         }));
         setOnboardingFeedback(null);
         setIsOnboardingOpen(true);
@@ -283,7 +288,7 @@ export function AuthScreen() {
     return () => {
       cancelled = true;
     };
-  }, [isLoading, resolvedUserUid, router, user]);
+  }, [form.firstName, isLoading, resolvedUserUid, router, user]);
 
   const updateField = (field: keyof FormState, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -305,13 +310,20 @@ export function AuthScreen() {
     event.preventDefault();
     setFeedback({ tone: "idle", message: "" });
 
+    const trimmedFirstName = form.firstName.trim();
+
+    if (mode === "register" && !trimmedFirstName) {
+      setFeedback({ tone: "error", message: "You must enter your name." });
+      return;
+    }
+
     startTransition(async () => {
       try {
         if (mode === "register") {
           await register({
             email: form.email,
             password: form.password,
-            displayName: form.firstName || undefined,
+            displayName: trimmedFirstName,
             persistence: "local",
           });
           return;
@@ -369,7 +381,10 @@ export function AuthScreen() {
     setIsSavingOnboarding(true);
 
     try {
-      await userService.createUser(onboardingForm);
+      await userService.createUser({
+        ...onboardingForm,
+        name: onboardingForm.name.trim(),
+      });
       setIsOnboardingOpen(false);
       router.replace(DASHBOARD_HOME_PATH);
     } catch (error) {
@@ -588,11 +603,21 @@ export function AuthScreen() {
             <div className="grid grid-cols-2 gap-4">
               <InputShell
                 disabled={isSavingOnboarding}
+                icon={<UserRound className="h-[18px] w-[18px]" strokeWidth={2.1} />}
+                onChange={(value) => updateOnboardingField("name", value)}
+                placeholder="Name"
+                value={onboardingForm.name}
+              />
+              <InputShell
+                disabled={isSavingOnboarding}
                 icon={<MapPinned className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                 onChange={(value) => updateOnboardingField("country", value)}
                 placeholder="Country"
                 value={onboardingForm.country}
               />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
               <InputShell
                 disabled={isSavingOnboarding}
                 icon={<MapPinned className="h-[18px] w-[18px]" strokeWidth={2.1} />}
