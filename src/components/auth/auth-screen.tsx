@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { DateField } from "@/components/ui/date-field";
 import { useAuth } from "@/components/providers/auth-provider";
 import { DASHBOARD_HOME_PATH } from "@/lib/routes";
 import {
@@ -45,7 +46,7 @@ type FeedbackState = {
 
 type OnboardingState = CreateUserPayload;
 
-const navigationItems = ["Who we are", "Services", "Blog"];
+const navigationItems = ["Quiénes somos", "Servicios", "Blog"];
 
 const initialFormState: FormState = {
   firstName: "",
@@ -89,6 +90,15 @@ const getCountryFromLocale = (locale: string) => {
   }
 };
 
+const getNameParts = (displayName?: string | null) => {
+  const nameParts = displayName?.trim().split(/\s+/).filter(Boolean) ?? [];
+
+  return {
+    firstName: nameParts[0] ?? "",
+    lastName: nameParts.slice(1).join(" "),
+  };
+};
+
 const getInitialOnboardingState = (): OnboardingState => {
   if (typeof window === "undefined") {
     return {
@@ -96,13 +106,14 @@ const getInitialOnboardingState = (): OnboardingState => {
       city: "",
       country: "",
       currency: "",
-      locale: "en-US",
+      lastName: "",
+      locale: "es-ES",
       name: "",
       timeZone: "UTC",
     };
   }
 
-  const locale = window.navigator.language || "en-US";
+  const locale = window.navigator.language || "es-ES";
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const region = getRegionFromLocale(locale);
 
@@ -111,6 +122,7 @@ const getInitialOnboardingState = (): OnboardingState => {
     city: "",
     country: getCountryFromLocale(locale),
     currency: regionCurrencyMap[region] || "",
+    lastName: "",
     locale,
     name: "",
     timeZone,
@@ -118,23 +130,23 @@ const getInitialOnboardingState = (): OnboardingState => {
 };
 
 const firebaseErrorMessages: Record<string, string> = {
-    "auth/invalid-credential": "Incorrect email or password.",
-    "auth/wrong-password": "Incorrect email or password.",
-    "auth/user-not-found": "Incorrect email or password.",
-    "auth/invalid-email": "The email format is invalid.",
-    "auth/email-already-in-use": "An account with this email already exists.",
-    "auth/weak-password": "The password is too weak.",
-    "auth/missing-password": "You must enter a password.",
-    "auth/missing-email": "You must enter an email address.",
-    "auth/too-many-requests": "Too many attempts. Please try again later.",
-    "auth/popup-closed-by-user": "You closed the Google sign-in window.",
-    "auth/cancelled-popup-request": "The Google sign-in request was cancelled.",
-    "auth/popup-blocked": "The browser blocked the Google popup window.",
+    "auth/invalid-credential": "El correo o la contraseña no son correctos.",
+    "auth/wrong-password": "El correo o la contraseña no son correctos.",
+    "auth/user-not-found": "El correo o la contraseña no son correctos.",
+    "auth/invalid-email": "El formato del correo no es válido.",
+    "auth/email-already-in-use": "Ya existe una cuenta con este correo.",
+    "auth/weak-password": "La contraseña es demasiado débil.",
+    "auth/missing-password": "Debes introducir una contraseña.",
+    "auth/missing-email": "Debes introducir un correo electrónico.",
+    "auth/too-many-requests": "Demasiados intentos. Inténtalo de nuevo más tarde.",
+    "auth/popup-closed-by-user": "Has cerrado la ventana de inicio de sesión con Google.",
+    "auth/cancelled-popup-request": "La solicitud de inicio de sesión con Google se ha cancelado.",
+    "auth/popup-blocked": "El navegador ha bloqueado la ventana emergente de Google.",
 };
 
 const normalizeFirebaseMessage = (error: unknown) => {
   if (!error || typeof error !== "object") {
-    return "The request could not be completed.";
+    return "No se ha podido completar la solicitud.";
   }
 
   const errorCode = "code" in error && typeof error.code === "string" ? error.code : null;
@@ -146,7 +158,7 @@ const normalizeFirebaseMessage = (error: unknown) => {
   const errorMessage =
     "message" in error && typeof error.message === "string"
       ? error.message
-      : "The request could not be completed.";
+      : "No se ha podido completar la solicitud.";
 
   return errorMessage
     .replace(/^firebase:\s*/i, "")
@@ -163,7 +175,7 @@ const normalizeUserServiceMessage = (error: unknown) => {
     return error.message;
   }
 
-  return "The user profile request could not be completed.";
+  return "No se ha podido completar la solicitud del perfil de usuario.";
 };
 
 function InputShell({
@@ -257,7 +269,9 @@ export function AuthScreen() {
           return;
         }
 
-        const resolvedName = form.firstName.trim() || user.displayName?.trim() || "";
+        const displayNameParts = getNameParts(user.displayName);
+        const resolvedName = form.firstName.trim() || displayNameParts.firstName;
+        const resolvedLastName = displayNameParts.lastName;
 
         setOnboardingForm((current) => ({
           ...getInitialOnboardingState(),
@@ -265,6 +279,7 @@ export function AuthScreen() {
           city: current.city,
           country: current.country || getInitialOnboardingState().country,
           currency: current.currency || getInitialOnboardingState().currency,
+          lastName: current.lastName?.trim() || resolvedLastName,
           name: current.name.trim() || resolvedName,
         }));
         setOnboardingFeedback(null);
@@ -313,7 +328,7 @@ export function AuthScreen() {
     const trimmedFirstName = form.firstName.trim();
 
     if (mode === "register" && !trimmedFirstName) {
-      setFeedback({ tone: "error", message: "You must enter your name." });
+      setFeedback({ tone: "error", message: "Debes introducir tu nombre." });
       return;
     }
 
@@ -344,7 +359,7 @@ export function AuthScreen() {
     event.preventDefault();
 
     if (!resetEmail.trim()) {
-      setResetFeedback("Enter your email to recover your password.");
+      setResetFeedback("Introduce tu correo para recuperar la contraseña.");
       return;
     }
 
@@ -356,7 +371,7 @@ export function AuthScreen() {
         await sendPasswordReset(resetEmail.trim());
         setIsForgotPasswordOpen(false);
         setResetEmail("");
-        setFeedback({ tone: "success", message: "Password recovery email sent." });
+        setFeedback({ tone: "success", message: "Correo de recuperación enviado." });
       } catch (error) {
         setResetFeedback(normalizeFirebaseMessage(error));
       }
@@ -383,6 +398,7 @@ export function AuthScreen() {
     try {
       await userService.createUser({
         ...onboardingForm,
+        lastName: onboardingForm.lastName?.trim() || undefined,
         name: onboardingForm.name.trim(),
       });
       setIsOnboardingOpen(false);
@@ -407,7 +423,7 @@ export function AuthScreen() {
         <header className="w-fit rounded-[20px] border border-[var(--white-alpha-35)] bg-[var(--white-alpha-58)] px-7 py-3 shadow-[0_18px_40px_var(--indigo-alpha-18)] backdrop-blur-[18px]">
           <div className="flex items-center gap-10">
             <Image
-              alt="Lizy logo"
+              alt="Logo de Lizy"
               className="h-14 w-auto scale-160 shrink-0"
               height={180}
               priority
@@ -422,7 +438,7 @@ export function AuthScreen() {
               ))}
             </nav>
             <Button className="h-[44px] rounded-[14px] bg-[var(--neutral-900)] px-7 text-[15px] font-semibold text-[var(--white)] hover:bg-[var(--neutral-950)]">
-              Get in touch
+              Contactar
             </Button>
           </div>
         </header>
@@ -430,10 +446,9 @@ export function AuthScreen() {
         <section className="flex flex-1 items-end justify-between">
           <div className="max-w-[640px] pb-12 pl-2 text-[var(--white)]">
             <h1 className="text-[58px] leading-[1.06] font-normal tracking-[-0.04em] drop-shadow-[0_8px_30px_var(--black-alpha-20)]">
-              <span className="block">We can turn your</span>
-              <span className="mr-4 font-semibold">dream</span>
-              <span>project into</span>
-              <span className="ml-4 font-serif italic">reality</span>
+              <span className="block">Convierte tu</span>
+              <span className="mr-4 font-semibold">proyecto</span>
+              <span className="ml-4 font-serif italic">en realidad</span>
             </h1>
           </div>
 
@@ -441,7 +456,7 @@ export function AuthScreen() {
             <div className="w-full rounded-[38px] bg-[var(--white)] px-[72px] py-[62px] shadow-[0_32px_90px_var(--navy-alpha-20)]">
               <div className="mb-12 text-center">
                 <h2 className="text-[30px] font-semibold tracking-[-0.03em] text-[var(--neutral-950)]">
-                    Glad to see you here!<span className="text-[26px]">👋🏻</span>
+                    ¡Nos alegra verte por aquí!
                 </h2>
               </div>
 
@@ -465,7 +480,7 @@ export function AuthScreen() {
                       disabled={isAuthFlowBusy}
                       icon={<UserRound className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                       onChange={(value) => updateField("firstName", value)}
-                      placeholder="First Name"
+                      placeholder="Nombre"
                       value={form.firstName}
                     />
                   </div>
@@ -474,7 +489,7 @@ export function AuthScreen() {
                   disabled={isAuthFlowBusy}
                   icon={<Mail className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                   onChange={(value) => updateField("email", value)}
-                  placeholder="Email"
+                  placeholder="Correo electrónico"
                   type="email"
                   value={form.email}
                 />
@@ -483,10 +498,10 @@ export function AuthScreen() {
                     disabled={isAuthFlowBusy}
                     icon={<LockKeyhole className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                     onChange={(value) => updateField("password", value)}
-                    placeholder="Password"
+                    placeholder="Contraseña"
                     rightAdornment={
                       <button
-                        aria-label={showPassword ? "Hide password" : "Show password"}
+                        aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
                         className="cursor-pointer border-none bg-transparent p-0 text-[var(--neutral-700)]"
                         disabled={isAuthFlowBusy}
                         onClick={(event) => {
@@ -514,7 +529,7 @@ export function AuthScreen() {
                     onClick={handleForgotPasswordOpen}
                     type="button"
                   >
-                    Forgot password?
+                    ¿Olvidaste tu contraseña?
                   </button>
                 </div>
 
@@ -523,7 +538,7 @@ export function AuthScreen() {
                   disabled={isAuthFlowBusy}
                   type="submit"
                 >
-                  {isResolvingUser ? "Checking account..." : mode === "register" ? "Create account" : "Login"}
+                  {isResolvingUser ? "Comprobando cuenta..." : mode === "register" ? "Crear cuenta" : "Iniciar sesión"}
                 </Button>
 
                 <p
@@ -538,7 +553,7 @@ export function AuthScreen() {
                 </p>
 
                 <p className="pt-1 text-center text-[15px] text-[var(--neutral-700)]">
-                  {mode === "register" ? "Already have an account? " : "Don't have an account? "}
+                  {mode === "register" ? "¿Ya tienes cuenta? " : "¿No tienes cuenta? "}
                   <button
                     className="border-none bg-transparent p-0 font-semibold text-[var(--blue-600)]"
                     disabled={isAuthFlowBusy}
@@ -548,14 +563,14 @@ export function AuthScreen() {
                     }}
                     type="button"
                   >
-                    {mode === "register" ? "Login." : "Sign up."}
+                    {mode === "register" ? "Inicia sesión." : "Regístrate."}
                   </button>
                 </p>
 
                 <div className="flex items-center gap-3 pb-1 pt-8">
                   <div className="h-px flex-1 bg-[var(--neutral-700)]" />
                   <span className="text-[11px] font-medium uppercase tracking-[0.2em] text-[var(--neutral-600)]">
-                    or
+                    o
                   </span>
                   <div className="h-px flex-1 bg-[var(--neutral-700)]" />
                 </div>
@@ -566,9 +581,9 @@ export function AuthScreen() {
                   onClick={handleGoogleSignIn}
                   type="button"
                 >
-                  <span>Login with Google</span>
+                  <span>Entrar con Google</span>
                   <Image
-                    alt="Google logo"
+                    alt="Logo de Google"
                     className="h-8 w-8 rounded-full"
                     height={32}
                     src="/google.png"
@@ -592,10 +607,10 @@ export function AuthScreen() {
         <DialogContent className="max-w-[520px] rounded-[28px] border border-[var(--sand-200)] bg-[var(--white)] p-8 text-[var(--sand-950)] shadow-[0_30px_90px_var(--navy-alpha-24)]">
           <DialogHeader className="space-y-2 text-left">
             <DialogTitle className="text-[28px] font-semibold tracking-[-0.03em] text-[var(--neutral-950)]">
-              Complete your profile
+              Completa tu perfil
             </DialogTitle>
             <DialogDescription className="text-[15px] leading-6 text-[var(--sand-600)]">
-              Your Firebase account exists, but we still need the onboarding data required by the backend before entering the app.
+              Tu cuenta de Firebase existe, pero todavía necesitamos los datos iniciales requeridos por el backend antes de entrar en la app.
             </DialogDescription>
           </DialogHeader>
 
@@ -605,15 +620,15 @@ export function AuthScreen() {
                 disabled={isSavingOnboarding}
                 icon={<UserRound className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                 onChange={(value) => updateOnboardingField("name", value)}
-                placeholder="Name"
+                placeholder="Nombre"
                 value={onboardingForm.name}
               />
               <InputShell
                 disabled={isSavingOnboarding}
-                icon={<MapPinned className="h-[18px] w-[18px]" strokeWidth={2.1} />}
-                onChange={(value) => updateOnboardingField("country", value)}
-                placeholder="Country"
-                value={onboardingForm.country}
+                icon={<UserRound className="h-[18px] w-[18px]" strokeWidth={2.1} />}
+                onChange={(value) => updateOnboardingField("lastName", value)}
+                placeholder="Apellido"
+                value={onboardingForm.lastName ?? ""}
               />
             </div>
 
@@ -621,8 +636,15 @@ export function AuthScreen() {
               <InputShell
                 disabled={isSavingOnboarding}
                 icon={<MapPinned className="h-[18px] w-[18px]" strokeWidth={2.1} />}
+                onChange={(value) => updateOnboardingField("country", value)}
+                placeholder="País"
+                value={onboardingForm.country}
+              />
+              <InputShell
+                disabled={isSavingOnboarding}
+                icon={<MapPinned className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                 onChange={(value) => updateOnboardingField("city", value)}
-                placeholder="City"
+                placeholder="Ciudad"
                 value={onboardingForm.city}
               />
             </div>
@@ -632,15 +654,18 @@ export function AuthScreen() {
                 disabled={isSavingOnboarding}
                 icon={<Coins className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                 onChange={(value) => updateOnboardingField("currency", value.toUpperCase())}
-                placeholder="Currency (EUR)"
+                placeholder="Moneda (EUR)"
                 value={onboardingForm.currency}
               />
-              <InputShell
+              <DateField
+                className="sm:col-span-1"
                 disabled={isSavingOnboarding}
-                icon={<CalendarDays className="h-[18px] w-[18px]" strokeWidth={2.1} />}
+                hideLabel
+                icon={CalendarDays}
+                label="Fecha de nacimiento"
+                max={new Date().toISOString().slice(0, 10)}
+                min="1900-01-01"
                 onChange={(value) => updateOnboardingField("birthDate", value)}
-                placeholder="Birth date"
-                type="date"
                 value={onboardingForm.birthDate}
               />
             </div>
@@ -654,7 +679,7 @@ export function AuthScreen() {
               disabled={isSavingOnboarding}
               type="submit"
             >
-              {isSavingOnboarding ? "Saving profile..." : "Continue"}
+              {isSavingOnboarding ? "Guardando perfil..." : "Continuar"}
             </Button>
           </form>
         </DialogContent>
@@ -672,10 +697,10 @@ export function AuthScreen() {
         <DialogContent className="max-w-[440px] rounded-[28px] border border-[var(--sand-200)] bg-[var(--white)] p-8 text-[var(--sand-950)] shadow-[0_30px_90px_var(--navy-alpha-24)]">
           <DialogHeader className="space-y-2 text-left">
             <DialogTitle className="text-[28px] font-semibold tracking-[-0.03em] text-[var(--neutral-950)]">
-              Recover password
+              Recuperar contraseña
             </DialogTitle>
             <DialogDescription className="text-[15px] leading-6 text-[var(--sand-600)]">
-              Enter your account email and we will send you a password recovery link.
+              Introduce el correo de tu cuenta y te enviaremos un enlace para recuperar la contraseña.
             </DialogDescription>
           </DialogHeader>
 
@@ -683,7 +708,7 @@ export function AuthScreen() {
             <InputShell
               icon={<Mail className="h-[18px] w-[18px]" strokeWidth={2.1} />}
               onChange={setResetEmail}
-              placeholder="Email"
+              placeholder="Correo electrónico"
               type="email"
               value={resetEmail}
             />
@@ -697,7 +722,7 @@ export function AuthScreen() {
               disabled={isPending}
               type="submit"
             >
-              Send email
+              Enviar correo
             </Button>
           </form>
         </DialogContent>

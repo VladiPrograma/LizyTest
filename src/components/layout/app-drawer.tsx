@@ -19,6 +19,12 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 type DrawerActionMap = Partial<Record<string, () => void>>;
+type DrawerMode = "view" | "edit";
+
+type DrawerModeSwitch = {
+  activeMode: DrawerMode;
+  onModeChange?: (mode: DrawerMode) => void;
+};
 
 type AppDrawerProps = {
   userName: string;
@@ -27,6 +33,7 @@ type AppDrawerProps = {
   userInitial: string;
   avatarBadge?: string;
   activeLabel?: string;
+  modeSwitch?: DrawerModeSwitch;
   itemActions?: DrawerActionMap;
   footerTitle: string;
   footerDescription: string;
@@ -35,6 +42,11 @@ type AppDrawerProps = {
   primaryActionOnClick: () => void;
   primaryActionDisabled?: boolean;
 };
+
+const drawerModeOptions = [
+  { label: "Ver", value: "view" },
+  { label: "Editar", value: "edit" },
+] as const;
 
 const navIconMap: Record<string, LucideIcon> = {
   Dashboard: LayoutDashboard,
@@ -98,6 +110,36 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return <p className="text-[12px] font-semibold tracking-[0.02em] text-[var(--payments-drawer-label)]">{children}</p>;
 }
 
+function ActiveModeSwitch({ activeMode, onModeChange }: DrawerModeSwitch) {
+  return (
+    <div className="space-y-2">
+      <SectionTitle>Modo activo</SectionTitle>
+      <div className="grid w-fit grid-cols-2 gap-1 rounded-[14px] border border-[var(--white-alpha-15)] bg-[var(--white-alpha-08)] p-1">
+        {drawerModeOptions.map((option) => {
+          const active = option.value === activeMode;
+
+          return (
+            <button
+              aria-pressed={active}
+              className={cn(
+                "flex h-8 min-w-[64px] items-center justify-center rounded-[10px] px-3 text-[12px] font-semibold transition-colors",
+                active
+                  ? "bg-[var(--white)] font-bold text-[var(--blue-950)]"
+                  : "text-[var(--blue-200)] hover:bg-[var(--white-alpha-06)] hover:text-[var(--white)]",
+              )}
+              key={option.value}
+              onClick={() => onModeChange?.(option.value)}
+              type="button"
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function AppDrawer({
   userName,
   userSubtitle,
@@ -105,6 +147,7 @@ export function AppDrawer({
   userInitial,
   avatarBadge = "L",
   activeLabel,
+  modeSwitch,
   itemActions,
   footerTitle,
   footerDescription,
@@ -135,6 +178,7 @@ export function AppDrawer({
           <p className="mt-0.5 truncate text-[12px] font-medium text-[var(--payments-drawer-muted)]">{userSubtitle}</p>
         </div>
       </div>
+      {modeSwitch ? <ActiveModeSwitch activeMode={modeSwitch.activeMode} onModeChange={modeSwitch.onModeChange} /> : null}
       <div className="space-y-5">
         {sidebarSections.map((section) => (
           <div className="space-y-2" key={section.title}>
@@ -142,7 +186,7 @@ export function AppDrawer({
             <div className="space-y-1.5">
               {section.items.map((item) => (
                 <SidebarNavItem
-                  active={item.label === activeLabel || (!activeLabel && "active" in item && item.active)}
+                  active={item.label === activeLabel}
                   href={"href" in item ? item.href : undefined}
                   key={item.label}
                   label={item.label}

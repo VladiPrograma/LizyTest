@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "lizy-test",
-  description: "Minimal single-page app",
+  title: "Lizy",
+  description: "Aplicación de Lizy",
 };
 
 export default function RootLayout({
@@ -25,7 +25,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="es">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <ToastProvider>
           <AuthProvider>{children}</AuthProvider>

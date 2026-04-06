@@ -507,7 +507,7 @@ function createPaymentEditForm(
     date: payment.date,
     description: payment.description ?? "",
     type: payment.type,
-    updateAll: false,
+    updateAll: Boolean(payment.businessName?.trim()),
   };
 }
 
@@ -1079,12 +1079,6 @@ function PaymentEditDialog({
                   </div>
                 ) : null}
               </section>
-            ) : null}
-
-            {payment?.needsReview ? (
-              <div className="rounded-[18px] border border-[var(--payments-soft-blue-border)] bg-[var(--payments-soft-blue-panel)] px-4 py-3 text-[13px] font-medium leading-6 text-[var(--accent-blue)]">
-                Al guardar, este pago dejará de aparecer como pendiente de procesar.
-              </div>
             ) : null}
 
             {error ? <p className="text-[13px] font-medium text-[var(--danger-red)]">{error}</p> : null}
@@ -1849,6 +1843,10 @@ export function PaymentsHistoryScreen() {
 
     const updatePayload = buildPaymentUpdatePayload(selectedPayment, paymentEditForm);
 
+    if (paymentEditForm.updateAll && selectedPayment.needsReview) {
+      updatePayload.needsReview = false;
+    }
+
     if (Object.keys(updatePayload).length === 0) {
       setPaymentEditError("No hay cambios para guardar.");
       return;
@@ -1901,6 +1899,7 @@ export function PaymentsHistoryScreen() {
           footerDescription="Esta app esta en desarrollo. Llevo 3 dias trabajando en esto, si 3 dias. Es probable que encuentres fallos, si esto sucede envia un email: info@visco.uno y respondere cuando pueda. Si me quieres enviar dinero tambien puedes. Un beso!"
           footerTitle="Version 0.0.1"
           itemActions={{ "Cerrar sesión": handleLogout }}
+          modeSwitch={{ activeMode: "view" }}
           primaryActionDisabled={isPending}
           primaryActionIcon={Mail}
           primaryActionLabel="CONTACTA"
@@ -2196,9 +2195,7 @@ export function PaymentsHistoryScreen() {
                                 label={entry.subCategory}
                                 showDot={!entry.subCategoryIconName}
                               />
-                            ) : (
-                              <span className="block text-[13px] font-medium text-[var(--text-muted)]">Sin subcategoria</span>
-                            )}
+                            ) : null}
                           </td>
                           <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
                             <PaymentTypeBadge

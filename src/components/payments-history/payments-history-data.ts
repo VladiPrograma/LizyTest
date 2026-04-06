@@ -155,7 +155,7 @@ export const sidebarSections = [
     title: "Navegación",
     items: [
       { label: "Dashboard" },
-      { label: "Historial de pagos", href: "/dashboard/payments-history", active: true },
+      { label: "Historial de pagos", href: "/dashboard/payments-history" },
       { label: "Pagos por categoría" },
       { label: "Pagos por empresa" },
       { label: "Pagos pendientes" },

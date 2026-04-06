@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon as IconifyIcon } from "@iconify/react";
-import { ChevronDown, ChevronLeft, ChevronRight, LoaderCircle, Plus, type LucideIcon } from "lucide-react";
+import { ChevronDown, LoaderCircle, Plus, type LucideIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+export { DateField } from "@/components/ui/date-field";
 
 export type SelectFieldOption = {
   label: string;
@@ -33,16 +34,6 @@ type CompactSelectFieldProps = {
   options: SelectFieldOption[];
   onChange: (value: string) => void;
   className?: string;
-};
-
-type DateFieldProps = {
-  icon: LucideIcon;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  className?: string;
-  min?: string;
-  max?: string;
 };
 
 type InputFieldProps = {
@@ -79,93 +70,6 @@ type SearchableSelectFieldProps = {
   className?: string;
   placeholder?: string;
   emptyMessage?: string;
-};
-
-const dateLabelFormatter = new Intl.DateTimeFormat("es-ES", {
-  day: "numeric",
-  month: "long",
-  timeZone: "UTC",
-  year: "numeric",
-});
-const monthLabelFormatter = new Intl.DateTimeFormat("es-ES", {
-  month: "long",
-  timeZone: "UTC",
-  year: "numeric",
-});
-const weekdayLabels = ["L", "M", "X", "J", "V", "S", "D"];
-
-const parseIsoDate = (value?: string) => {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return null;
-  }
-
-  const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return date;
-};
-
-const toIsoDate = (date: Date) => {
-  return [
-    date.getUTCFullYear(),
-    String(date.getUTCMonth() + 1).padStart(2, "0"),
-    String(date.getUTCDate()).padStart(2, "0"),
-  ].join("-");
-};
-
-const startOfUtcMonth = (date: Date) => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
-const endOfUtcMonth = (date: Date) => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
-const addUtcMonths = (date: Date, months: number) => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1));
-
-const getCalendarOffset = (date: Date) => {
-  const day = date.getUTCDay();
-
-  return day === 0 ? 6 : day - 1;
-};
-
-const isSameUtcDay = (left: Date, right: Date) => {
-  return (
-    left.getUTCFullYear() === right.getUTCFullYear() &&
-    left.getUTCMonth() === right.getUTCMonth() &&
-    left.getUTCDate() === right.getUTCDate()
-  );
-};
-
-const isOutsideRange = (date: Date, minDate: Date | null, maxDate: Date | null) => {
-  if (minDate && date.getTime() < minDate.getTime()) {
-    return true;
-  }
-
-  return !!(maxDate && date.getTime() > maxDate.getTime());
-
-
-};
-
-const canNavigateToMonth = (date: Date, minDate: Date | null, maxDate: Date | null) => {
-  const monthStart = startOfUtcMonth(date);
-  const monthEnd = endOfUtcMonth(date);
-
-  if (minDate && monthEnd.getTime() < minDate.getTime()) {
-    return false;
-  }
-
-  return !(maxDate && monthStart.getTime() > maxDate.getTime());
-
-
-};
-
-const getInitialVisibleMonth = (value?: string, min?: string, max?: string) => {
-  const selectedDate = parseIsoDate(value);
-  const minDate = parseIsoDate(min);
-  const maxDate = parseIsoDate(max);
-  const today = new Date();
-  const todayUtc = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
-
-  return startOfUtcMonth(selectedDate ?? minDate ?? maxDate ?? todayUtc);
 };
 
 const getSelectedOption = (options: SelectFieldOption[], value: string | number) => {
@@ -311,141 +215,6 @@ export function CompactSelectField({
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-export function DateField({
-  icon: Icon,
-  label,
-  value,
-  onChange,
-  className,
-  min,
-  max,
-}: DateFieldProps) {
-  const [open, setOpen] = useState(false);
-  const [visibleMonth, setVisibleMonth] = useState(() => getInitialVisibleMonth(value, min, max));
-  const selectedDate = useMemo(() => parseIsoDate(value), [value]);
-  const minDate = useMemo(() => parseIsoDate(min), [min]);
-  const maxDate = useMemo(() => parseIsoDate(max), [max]);
-  const selectedLabel = selectedDate ? dateLabelFormatter.format(selectedDate) : "Selecciona una fecha";
-  const monthLabel = monthLabelFormatter.format(visibleMonth);
-  const previousMonth = addUtcMonths(visibleMonth, -1);
-  const nextMonth = addUtcMonths(visibleMonth, 1);
-  const isPreviousDisabled = !canNavigateToMonth(previousMonth, minDate, maxDate);
-  const isNextDisabled = !canNavigateToMonth(nextMonth, minDate, maxDate);
-  const calendarDays = useMemo(() => {
-    const monthStart = startOfUtcMonth(visibleMonth);
-    const daysInMonth = endOfUtcMonth(visibleMonth).getUTCDate();
-    const offset = getCalendarOffset(monthStart);
-
-    return [
-      ...Array.from({ length: offset }, () => null),
-      ...Array.from({ length: daysInMonth }, (_, index) => new Date(Date.UTC(visibleMonth.getUTCFullYear(), visibleMonth.getUTCMonth(), index + 1))),
-    ];
-  }, [visibleMonth]);
-
-  useEffect(() => {
-    if (open) {
-      setVisibleMonth(getInitialVisibleMonth(value, min, max));
-    }
-  }, [max, min, open, value]);
-
-  return (
-    <div className={cn("group flex min-w-0 flex-col gap-1.5", className)}>
-      <span className="pl-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-        {label}
-      </span>
-      <DropdownMenu onOpenChange={setOpen} open={open}>
-        <DropdownMenuTrigger asChild>
-          <button
-            aria-label={label}
-            className="relative flex h-12 w-full items-center gap-3 overflow-hidden rounded-[14px] border border-[var(--border-color)] bg-[linear-gradient(180deg,var(--bg-white)_0%,var(--bg-light)_180%)] px-3 text-left shadow-[0_10px_30px_var(--navy-alpha-03)] transition duration-200 hover:border-[var(--blue-200)] focus-visible:border-[var(--accent-blue)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_var(--blue-alpha-25)]"
-            type="button"
-          >
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[var(--accent-blue-light)] text-[var(--accent-blue)] ring-1 ring-[var(--blue-100)]">
-              <Icon className="h-4 w-4" />
-            </span>
-            <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-[var(--text-primary)]">
-              {selectedLabel}
-            </span>
-            <ChevronDown className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          className="w-[320px] rounded-[18px] border border-[var(--border-color)] bg-[var(--white-alpha-90)] p-3 shadow-[0_24px_60px_var(--navy-alpha-20)] backdrop-blur-xl"
-          sideOffset={8}
-        >
-          <div className="flex items-center justify-between gap-3 pb-3">
-            <button
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border-color)] bg-[var(--bg-white)] text-[var(--text-secondary)] transition-colors hover:border-[var(--blue-200)] hover:text-[var(--accent-blue)] disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={isPreviousDisabled}
-              onClick={() => setVisibleMonth(previousMonth)}
-              type="button"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <div className="text-center">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Calendario</p>
-              <p className="text-[15px] font-semibold capitalize text-[var(--text-primary)]">{monthLabel}</p>
-            </div>
-            <button
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border-color)] bg-[var(--bg-white)] text-[var(--text-secondary)] transition-colors hover:border-[var(--blue-200)] hover:text-[var(--accent-blue)] disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={isNextDisabled}
-              onClick={() => setVisibleMonth(nextMonth)}
-              type="button"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-          <div className="grid grid-cols-7 gap-1 pb-2">
-            {weekdayLabels.map((dayLabel) => (
-              <span
-                className="flex h-8 items-center justify-center text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]"
-                key={dayLabel}
-              >
-                {dayLabel}
-              </span>
-            ))}
-          </div>
-          <div className="grid grid-cols-7 gap-1">
-            {calendarDays.map((day, index) => {
-              if (!day) {
-                return <span className="h-10" key={`empty-${index}`} />;
-              }
-
-              const isDisabled = isOutsideRange(day, minDate, maxDate);
-              const isSelected = selectedDate ? isSameUtcDay(day, selectedDate) : false;
-              const isToday = isSameUtcDay(day, new Date(Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate())));
-
-              return (
-                <button
-                  className={cn(
-                    "flex h-10 items-center justify-center rounded-[12px] text-[13px] font-semibold transition-colors",
-                    isSelected
-                      ? "bg-[var(--accent-blue)] text-[var(--white)] shadow-[0_10px_18px_var(--blue-alpha-25)]"
-                      : isDisabled
-                        ? "cursor-not-allowed text-[var(--text-muted)] opacity-35"
-                        : "text-[var(--text-primary)] hover:bg-[var(--accent-blue-light)] hover:text-[var(--accent-blue)]",
-                    isToday && !isSelected ? "ring-1 ring-[var(--blue-200)]" : "",
-                  )}
-                  disabled={isDisabled}
-                  key={toIsoDate(day)}
-                  onClick={() => {
-                    onChange(toIsoDate(day));
-                    setOpen(false);
-                  }}
-                  type="button"
-                >
-                  {day.getUTCDate()}
-                </button>
-              );
-            })}
-          </div>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
   );
 }
 

@@ -277,7 +277,7 @@ export function UserSettingsScreen() {
     }
   };
 
-  if (isLoading || !isAuthenticated || isLoadingProfile) {
+  if (isLoading || !isAuthenticated) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[var(--bg-page)] text-[var(--text-secondary)]">
         <p className="text-[15px] font-medium">Cargando configuración de usuario...</p>
@@ -289,6 +289,51 @@ export function UserSettingsScreen() {
   const drawerUserPhotoUrl = currentUserProfile?.profilePhotoUrl || user?.photoURL || null;
   const drawerUserSubtitle = currentUserProfile?.email || user?.email || "Cuenta activa";
   const drawerUserInitial = drawerUserName.charAt(0).toUpperCase() || "U";
+  const drawer = (
+    <AppDrawer
+      activeLabel="Usuario"
+      avatarBadge="L"
+      footerDescription="Revisa y actualiza tus datos personales, regionales y de perfil desde una única pantalla."
+      footerTitle="Configuración de usuario"
+      itemActions={{ "Cerrar sesión": handleLogout }}
+      primaryActionDisabled={isPending}
+      primaryActionIcon={Mail}
+      primaryActionLabel="CONTACTA"
+      primaryActionOnClick={handleContact}
+      userInitial={drawerUserInitial}
+      userName={drawerUserName}
+      userPhotoUrl={drawerUserPhotoUrl}
+      userSubtitle={drawerUserSubtitle}
+    />
+  );
+
+  if (isLoadingProfile) {
+    return (
+      <main className="flex min-h-screen bg-[var(--bg-page)]">
+        {drawer}
+
+        <section className="flex min-w-0 flex-1 flex-col bg-[var(--bg-page)] p-5 sm:p-6 lg:p-10 xl:ml-[284px] xl:min-h-screen">
+          <div className="mx-auto flex w-full max-w-5xl flex-col gap-7">
+            <header className="space-y-3">
+              <div className="h-5 w-48 animate-pulse rounded-full bg-[var(--neutral-300)]" />
+              <div className="space-y-3">
+                <div className="h-9 w-72 animate-pulse rounded-full bg-[var(--neutral-300)]" />
+                <div className="h-5 w-full max-w-2xl animate-pulse rounded-full bg-[var(--neutral-300)]" />
+              </div>
+            </header>
+
+            <div className="rounded-[26px] border border-[var(--border-color)] bg-[var(--bg-white)] p-5 shadow-[0_24px_60px_var(--navy-alpha-08)] sm:p-6">
+              <div className="grid gap-4 sm:grid-cols-2">
+                {Array.from({ length: 10 }, (_, index) => (
+                  <div className="h-16 animate-pulse rounded-[14px] bg-[var(--neutral-100)]" key={index} />
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="flex min-h-screen bg-[var(--bg-page)]">
@@ -408,6 +453,8 @@ export function UserSettingsScreen() {
                 className="sm:col-span-1"
                 icon={Calendar}
                 label="Fecha de nacimiento"
+                max={new Date().toISOString().slice(0, 10)}
+                min="1900-01-01"
                 onChange={(value) => handleFieldChange("birthDate", value)}
                 value={form.birthDate}
               />
