@@ -7,6 +7,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { InlineDropdownSelect } from "@/components/ui/inline-dropdown-select";
 import { cn } from "@/lib/utils";
 
 type DateFieldProps = {
@@ -19,6 +20,7 @@ type DateFieldProps = {
   hideLabel?: boolean;
   min?: string;
   max?: string;
+  tone?: "accent" | "neutral";
 };
 
 const monthLabelFormatter = new Intl.DateTimeFormat("es-ES", {
@@ -181,6 +183,7 @@ export function DateField({
   hideLabel = false,
   min,
   max,
+  tone = "accent",
 }: DateFieldProps) {
   const [open, setOpen] = useState(false);
   const [visibleMonth, setVisibleMonth] = useState(() => getInitialVisibleMonth(value, min, max));
@@ -194,6 +197,8 @@ export function DateField({
   const isPreviousDisabled = !canNavigateToMonth(previousMonth, minDate, maxDate);
   const isNextDisabled = !canNavigateToMonth(nextMonth, minDate, maxDate);
   const yearOptions = useMemo(() => getYearOptions(minDate, maxDate, visibleMonth), [maxDate, minDate, visibleMonth]);
+  const yearSelectOptions = useMemo(() => yearOptions.map((year) => ({ label: String(year), value: year })), [yearOptions]);
+  const isNeutralTone = tone === "neutral";
   const calendarDays = useMemo(() => {
     const monthStart = startOfUtcMonth(visibleMonth);
     const daysInMonth = endOfUtcMonth(visibleMonth).getUTCDate();
@@ -249,13 +254,32 @@ export function DateField({
         {label}
       </span>
       <DropdownMenu onOpenChange={(nextOpen) => !disabled && setOpen(nextOpen)} open={disabled ? false : open}>
-        <div className="relative flex h-12 w-full items-center gap-3 overflow-hidden rounded-[14px] border border-[var(--border-color)] bg-[linear-gradient(180deg,var(--bg-white)_0%,var(--bg-light)_180%)] px-3 text-left shadow-[0_10px_30px_var(--navy-alpha-03)] transition duration-200 hover:border-[var(--blue-200)] focus-within:border-[var(--accent-blue)] focus-within:shadow-[0_0_0_3px_var(--blue-alpha-25)]">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[var(--accent-blue-light)] text-[var(--accent-blue)] ring-1 ring-[var(--blue-100)]">
+        <div
+          className={cn(
+            "relative flex h-12 w-full items-center gap-3 overflow-hidden text-left transition duration-200",
+            isNeutralTone
+              ? "rounded-[16px] border border-[var(--neutral-500)] bg-[var(--white)] px-4 shadow-[0_2px_10px_var(--black-alpha-03)] hover:border-[var(--neutral-600)] focus-within:border-[var(--neutral-700)]"
+              : "rounded-[14px] border border-[var(--border-color)] bg-[linear-gradient(180deg,var(--bg-white)_0%,var(--bg-light)_180%)] px-3 shadow-[0_10px_30px_var(--navy-alpha-03)] hover:border-[var(--blue-200)] focus-within:border-[var(--accent-blue)] focus-within:shadow-[0_0_0_3px_var(--blue-alpha-25)]",
+          )}
+        >
+          <span
+            className={cn(
+              "flex shrink-0 items-center justify-center",
+              isNeutralTone
+                ? "text-[var(--neutral-600)]"
+                : "h-8 w-8 rounded-[10px] bg-[var(--accent-blue-light)] text-[var(--accent-blue)] ring-1 ring-[var(--blue-100)]",
+            )}
+          >
             <Icon className="h-4 w-4" />
           </span>
           <input
             aria-label={label}
-            className="min-w-0 flex-1 bg-transparent text-[14px] font-semibold text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-60"
+            className={cn(
+              "min-w-0 flex-1 bg-transparent outline-none disabled:cursor-not-allowed disabled:opacity-60",
+              isNeutralTone
+                ? "text-[16px] font-medium text-[var(--neutral-800)] placeholder:text-[var(--neutral-600)]"
+                : "text-[14px] font-semibold text-[var(--text-primary)] placeholder:text-[var(--text-muted)]",
+            )}
             disabled={disabled}
             inputMode="numeric"
             onBlur={handleDraftBlur}
@@ -266,7 +290,12 @@ export function DateField({
           <DropdownMenuTrigger asChild>
             <button
               aria-label={`Abrir calendario de ${label}`}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] text-[var(--text-muted)] transition-colors hover:bg-[var(--accent-blue-light)] hover:text-[var(--accent-blue)] disabled:cursor-not-allowed disabled:opacity-60"
+              className={cn(
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+                isNeutralTone
+                  ? "text-[var(--neutral-600)] hover:bg-[var(--neutral-100)] hover:text-[var(--neutral-800)]"
+                  : "text-[var(--text-muted)] hover:bg-[var(--accent-blue-light)] hover:text-[var(--accent-blue)]",
+              )}
               disabled={disabled}
               type="button"
             >
@@ -276,7 +305,7 @@ export function DateField({
         </div>
         <DropdownMenuContent
           align="end"
-          className="w-[320px] rounded-[18px] border border-[var(--border-color)] bg-[var(--white-alpha-90)] p-3 shadow-[0_24px_60px_var(--navy-alpha-20)] backdrop-blur-xl"
+          className="w-[320px] overflow-visible rounded-[18px] border border-[var(--border-color)] bg-[var(--white-alpha-90)] p-3 shadow-[0_24px_60px_var(--navy-alpha-20)] backdrop-blur-xl"
           sideOffset={8}
         >
           <div className="flex items-center justify-between gap-3 pb-3">
@@ -302,36 +331,27 @@ export function DateField({
             </button>
           </div>
           <div className="grid grid-cols-[1.35fr_0.9fr] gap-2 pb-3">
-            <label className="space-y-1">
+            <div className="space-y-1">
               <span className="pl-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Mes</span>
-              <select
-                aria-label="Mes"
-                className="h-11 w-full rounded-[12px] border border-[var(--border-color)] bg-[linear-gradient(180deg,var(--bg-white)_0%,var(--bg-light)_180%)] px-3 text-[14px] font-semibold text-[var(--text-primary)] shadow-[0_8px_20px_var(--navy-alpha-03)] outline-none transition-colors hover:border-[var(--blue-200)] focus:border-[var(--accent-blue)]"
-                onChange={(event) => updateVisibleMonth(visibleMonth.getUTCFullYear(), Number(event.target.value))}
+              <InlineDropdownSelect
+                disabled={disabled}
+                label="Mes"
+                onChange={(nextMonth) => updateVisibleMonth(visibleMonth.getUTCFullYear(), Number(nextMonth))}
+                options={monthSelectOptions}
                 value={visibleMonth.getUTCMonth()}
-              >
-                {monthSelectOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="space-y-1">
+              />
+            </div>
+            <div className="space-y-1">
               <span className="pl-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Año</span>
-              <select
-                aria-label="Año"
-                className="h-11 w-full rounded-[12px] border border-[var(--border-color)] bg-[linear-gradient(180deg,var(--bg-white)_0%,var(--bg-light)_180%)] px-3 text-[14px] font-semibold text-[var(--text-primary)] shadow-[0_8px_20px_var(--navy-alpha-03)] outline-none transition-colors hover:border-[var(--blue-200)] focus:border-[var(--accent-blue)]"
-                onChange={(event) => updateVisibleMonth(Number(event.target.value), visibleMonth.getUTCMonth())}
+              <InlineDropdownSelect
+                align="end"
+                disabled={disabled}
+                label="Año"
+                onChange={(nextYear) => updateVisibleMonth(Number(nextYear), visibleMonth.getUTCMonth())}
+                options={yearSelectOptions}
                 value={visibleMonth.getUTCFullYear()}
-              >
-                {yearOptions.map((year) => (
-                  <option key={year} value={year}>
-                    {year}
-                  </option>
-                ))}
-              </select>
-            </label>
+              />
+            </div>
           </div>
           <div className="grid grid-cols-7 gap-1 pb-2">
             {weekdayLabels.map((dayLabel) => (

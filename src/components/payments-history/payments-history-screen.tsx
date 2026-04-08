@@ -22,6 +22,7 @@ import {
   FileText,
   House,
   Mail,
+  Pencil,
   Plus,
   ReceiptText,
   Repeat2,
@@ -29,6 +30,7 @@ import {
   Tag,
   TrendingDown,
   TrendingUp,
+  Trash2,
   Wallet,
   Wifi,
   Zap,
@@ -142,8 +144,10 @@ const paymentTypeFormOptions: SelectFieldOption[] = [
 ];
 const currencyPattern = /^[A-Z]{3}$/;
 const amountEqualityThreshold = 0.000001;
+const paymentSelectionTransitionMs = 220;
 
 type BulkUpdateScope = "same-business" | "same-business-and-amount";
+type DrawerMode = "view" | "edit";
 type PeriodSelection = "Mensual" | "Anual" | "Personalizado";
 type StoredPeriodPreferences = {
   period: PeriodSelection;
@@ -762,6 +766,8 @@ function MobilePaymentCard({
   description,
   displayDate,
   direction,
+  isSelected = false,
+  isSelectionMode = false,
   onClick,
   paymentTypeLabel,
   statusLabel,
@@ -777,20 +783,41 @@ function MobilePaymentCard({
   description: string;
   displayDate: string;
   direction: "incoming" | "outgoing";
+  isSelected?: boolean;
+  isSelectionMode?: boolean;
   onClick: () => void;
   paymentTypeLabel?: string;
   statusLabel?: string;
 }) {
   return (
     <button
-      className="rounded-[18px] border border-[var(--border-color)] bg-[var(--bg-white)] p-4 text-left shadow-[0_18px_30px_var(--navy-alpha-03)] transition duration-200 hover:border-[var(--blue-200)] hover:shadow-[0_22px_36px_var(--navy-alpha-08)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_var(--blue-alpha-25)]"
+      aria-pressed={isSelectionMode ? isSelected : undefined}
+      className={cn(
+        "rounded-[18px] border border-[var(--border-color)] bg-[var(--bg-white)] p-4 text-left shadow-[0_18px_30px_var(--navy-alpha-03)] transition duration-200 hover:border-[var(--blue-200)] hover:shadow-[0_22px_36px_var(--navy-alpha-08)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_var(--blue-alpha-25)]",
+        isSelectionMode && isSelected ? "border-[var(--accent-blue)] bg-[var(--accent-blue-light)]" : null,
+      )}
       onClick={onClick}
       type="button"
     >
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-[12px] font-medium text-[var(--text-secondary)]">{displayDate}</p>
-          <h3 className="mt-1 text-[15px] font-semibold text-[var(--text-primary)]">{business}</h3>
+        <div className="flex items-start gap-3">
+          {isSelectionMode ? (
+            <span
+              aria-hidden="true"
+              className={cn(
+                "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] border transition-colors",
+                isSelected
+                  ? "border-[var(--accent-blue)] bg-[var(--accent-blue)] text-[var(--white)]"
+                  : "border-[var(--border-color)] bg-[var(--bg-white)] text-transparent",
+              )}
+            >
+              <span className="h-2 w-2 rounded-[3px] bg-current" />
+            </span>
+          ) : null}
+          <div>
+            <p className="text-[12px] font-medium text-[var(--text-secondary)]">{displayDate}</p>
+            <h3 className="mt-1 text-[15px] font-semibold text-[var(--text-primary)]">{business}</h3>
+          </div>
         </div>
         <p
           className={cn(
@@ -1150,6 +1177,9 @@ export function PaymentsHistoryScreen() {
   const [isSavingPayment, setIsSavingPayment] = useState(false);
   const [paymentEditError, setPaymentEditError] = useState<string | null>(null);
   const [categoriesError, setCategoriesError] = useState<string | null>(null);
+  const [drawerMode, setDrawerMode] = useState<DrawerMode>("view");
+  const [isPaymentSelectionUiExpanded, setIsPaymentSelectionUiExpanded] = useState(false);
+  const [selectedPaymentIds, setSelectedPaymentIds] = useState<string[]>([]);
   const availableYearOptions = selectableYearOptions;
   const availableMonthOptions = selectableMonthOptions;
   const categoriesByName = useMemo(
@@ -1200,6 +1230,25 @@ export function PaymentsHistoryScreen() {
   const paymentRows = useMemo(
     () => payments.map((payment) => ({ entry: mapPaymentToEntry(payment, categoriesByName, subcategoriesByName), payment })),
     [categoriesByName, payments, subcategoriesByName],
+  );
+  const isDrawerEditMode = drawerMode === "edit";
+  const selectedPaymentIdSet = useMemo(() => new Set(selectedPaymentIds), [selectedPaymentIds]);
+  const visiblePaymentIds = useMemo(() => payments.map((payment) => payment.id), [payments]);
+  const selectedPaymentsCount = selectedPaymentIds.length;
+  const allVisiblePaymentsSelected =
+    visiblePaymentIds.length > 0 && visiblePaymentIds.every((paymentId) => selectedPaymentIdSet.has(paymentId));
+  const tableColumnCount = 7;
+  const selectionHeaderCellClassName = cn(
+    "overflow-hidden py-4 transition-all duration-200 ease-in-out",
+    isPaymentSelectionUiExpanded ? "w-[56px] px-5 opacity-100" : "w-0 px-0 opacity-0",
+  );
+  const selectionBodyCellClassName = cn(
+    "overflow-hidden border-t border-[var(--border-color)] py-4 align-middle transition-all duration-200 ease-in-out",
+    isPaymentSelectionUiExpanded ? "w-[56px] px-5 opacity-100" : "w-0 px-0 opacity-0",
+  );
+  const selectionCheckboxClassName = cn(
+    "h-4 w-4 rounded-[4px] accent-[var(--accent-blue)] transition-opacity duration-150",
+    isPaymentSelectionUiExpanded ? "opacity-100" : "pointer-events-none opacity-0",
   );
   const monthSelectOptions: SelectFieldOption[] = availableMonthOptions.map((option) => ({ label: option, value: option }));
   const yearSelectOptions: SelectFieldOption[] = availableYearOptions.map((option) => ({ label: option, value: option }));
@@ -1461,6 +1510,30 @@ export function PaymentsHistoryScreen() {
   }, [currentPage, totalPages]);
 
   useEffect(() => {
+    if (isDrawerEditMode) {
+      const animationFrame = window.requestAnimationFrame(() => {
+        setIsPaymentSelectionUiExpanded(true);
+      });
+
+      return () => window.cancelAnimationFrame(animationFrame);
+    }
+
+    setIsPaymentSelectionUiExpanded(false);
+
+    const clearSelectionTimeout = window.setTimeout(() => {
+      setSelectedPaymentIds([]);
+    }, paymentSelectionTransitionMs);
+
+    return () => window.clearTimeout(clearSelectionTimeout);
+  }, [isDrawerEditMode]);
+
+  useEffect(() => {
+    const visibleIds = new Set(visiblePaymentIds);
+
+    setSelectedPaymentIds((currentPaymentIds) => currentPaymentIds.filter((paymentId) => visibleIds.has(paymentId)));
+  }, [visiblePaymentIds]);
+
+  useEffect(() => {
     setPaymentEditForm((currentForm) => {
       if (!currentForm?.subCategory.trim()) {
         return currentForm;
@@ -1663,6 +1736,43 @@ export function PaymentsHistoryScreen() {
     setMinAmount(minValue);
     setMaxAmount(maxValue);
     setCurrentPage(1);
+  };
+
+  const handleDrawerModeChange = (mode: DrawerMode) => {
+    setDrawerMode(mode);
+  };
+
+  const handlePaymentSelectionToggle = (paymentId: string) => {
+    setSelectedPaymentIds((currentPaymentIds) =>
+      currentPaymentIds.includes(paymentId)
+        ? currentPaymentIds.filter((currentPaymentId) => currentPaymentId !== paymentId)
+        : [...currentPaymentIds, paymentId],
+    );
+  };
+
+  const handleVisiblePaymentsSelectionToggle = () => {
+    if (visiblePaymentIds.length === 0) {
+      return;
+    }
+
+    setSelectedPaymentIds((currentPaymentIds) => {
+      const visibleIds = new Set(visiblePaymentIds);
+
+      if (visiblePaymentIds.every((paymentId) => currentPaymentIds.includes(paymentId))) {
+        return currentPaymentIds.filter((paymentId) => !visibleIds.has(paymentId));
+      }
+
+      return Array.from(new Set([...currentPaymentIds, ...visiblePaymentIds]));
+    });
+  };
+
+  const handlePaymentRowActivate = (payment: PaymentDto) => {
+    if (isDrawerEditMode) {
+      handlePaymentSelectionToggle(payment.id);
+      return;
+    }
+
+    handlePaymentSelect(payment);
   };
 
   const handleSortChange = (field: PaymentSortField) => {
@@ -1899,7 +2009,7 @@ export function PaymentsHistoryScreen() {
           footerDescription="Esta app esta en desarrollo. Llevo 3 dias trabajando en esto, si 3 dias. Es probable que encuentres fallos, si esto sucede envia un email: info@visco.uno y respondere cuando pueda. Si me quieres enviar dinero tambien puedes. Un beso!"
           footerTitle="Version 0.0.1"
           itemActions={{ "Cerrar sesión": handleLogout }}
-          modeSwitch={{ activeMode: "view" }}
+          modeSwitch={{ activeMode: drawerMode, onModeChange: handleDrawerModeChange }}
           primaryActionDisabled={isPending}
           primaryActionIcon={Mail}
           primaryActionLabel="CONTACTA"
@@ -2072,10 +2182,65 @@ export function PaymentsHistoryScreen() {
                   </div>
                 </div>
               ) : null}
+              <div
+                aria-hidden={!isDrawerEditMode}
+                className={cn(
+                  "grid transition-all duration-200 ease-in-out",
+                  isPaymentSelectionUiExpanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+                )}
+              >
+                <div className="overflow-hidden">
+                  <div className="flex flex-col gap-3 border-b border-[var(--border-color)] bg-[var(--bg-light)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                    <p className="text-[13px] font-semibold text-[var(--text-secondary)]">
+                      {selectedPaymentsCount === 0
+                        ? "Selecciona uno o varios pagos para gestionarlos."
+                        : `${selectedPaymentsCount} pago${selectedPaymentsCount === 1 ? "" : "s"} seleccionado${
+                            selectedPaymentsCount === 1 ? "" : "s"
+                          }.`}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        className="h-9 rounded-[8px] bg-[var(--bg-white)] px-3 text-[13px] font-semibold text-[var(--text-primary)] shadow-none ring-1 ring-[var(--border-color)] hover:bg-[var(--accent-blue-light)]"
+                        disabled={!isDrawerEditMode || selectedPaymentsCount === 0}
+                        title="Pendiente de implementación"
+                        type="button"
+                      >
+                        <Pencil className="h-4 w-4" />
+                        Editar
+                      </Button>
+                      <Button
+                        className="h-9 rounded-[8px] bg-[var(--bg-white)] px-3 text-[13px] font-semibold text-[var(--danger-red)] shadow-none ring-1 ring-[var(--border-color)] hover:bg-[var(--accent-blue-light)]"
+                        disabled={!isDrawerEditMode || selectedPaymentsCount === 0}
+                        title="Pendiente de implementación"
+                        type="button"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Eliminar
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div className="hidden overflow-x-auto lg:block">
-                <table className="w-full min-w-[1100px] border-separate border-spacing-0">
+                <table
+                  className={cn(
+                    "w-full border-separate border-spacing-0 transition-all duration-200 ease-in-out",
+                    isPaymentSelectionUiExpanded ? "min-w-[1160px]" : "min-w-[1100px]",
+                  )}
+                >
                   <thead className="bg-[var(--bg-light)] text-left">
                     <tr>
+                      <th className={selectionHeaderCellClassName}>
+                        <input
+                          aria-label="Seleccionar todos los pagos visibles"
+                          checked={allVisiblePaymentsSelected}
+                          className={selectionCheckboxClassName}
+                          disabled={!isDrawerEditMode || payments.length === 0}
+                          onChange={handleVisiblePaymentsSelectionToggle}
+                          tabIndex={isDrawerEditMode ? 0 : -1}
+                          type="checkbox"
+                        />
+                      </th>
                       <th className="w-[140px] px-5 py-4 text-[12px] font-semibold tracking-[0.04em] text-[var(--accent-blue)]">
                         <SortableHeader
                           active={sortField === "date"}
@@ -2135,7 +2300,7 @@ export function PaymentsHistoryScreen() {
                       <tr>
                         <td
                           className="border-t border-[var(--border-color)] px-5 py-10 text-center text-[13px] font-medium text-[var(--text-secondary)]"
-                          colSpan={6}
+                          colSpan={tableColumnCount}
                         >
                           Cargando pagos...
                         </td>
@@ -2144,77 +2309,98 @@ export function PaymentsHistoryScreen() {
                       <tr>
                         <td
                           className="border-t border-[var(--border-color)] px-5 py-10 text-center text-[13px] font-medium text-[var(--text-secondary)]"
-                          colSpan={6}
+                          colSpan={tableColumnCount}
                         >
                           No hay pagos para el rango seleccionado.
                         </td>
                       </tr>
                     ) : (
-                      paymentRows.map(({ entry, payment }) => (
-                        <tr
-                          className="cursor-pointer transition-colors hover:bg-[var(--accent-blue-light)]/45 focus-visible:outline-none"
-                          key={payment.id}
-                          onClick={() => handlePaymentSelect(payment)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              handlePaymentSelect(payment);
-                            }
-                          }}
-                          role="button"
-                          tabIndex={0}
-                        >
-                          <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle text-[13px] text-[var(--text-primary)]">
-                            {entry.displayDate}
-                          </td>
-                          <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
-                            <div className="flex flex-col justify-center gap-1.5">
-                              <span className="text-[13px] font-medium text-[var(--text-primary)]">{entry.business}</span>
-                              <span className="flex items-center gap-1 text-[12px] text-[var(--text-secondary)]">
-                                <FileText className="h-3 w-3 text-[var(--text-muted)]" />
-                                {entry.description}
-                              </span>
-                              {entry.statusLabel ? <ReviewStatusBadge label={entry.statusLabel} /> : null}
-                            </div>
-                          </td>
-                          <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
-                            <PaymentCategoryBadge
-                              backgroundColor={entry.categoryBadgeStyle.backgroundColor}
-                              color={entry.categoryBadgeStyle.color}
-                              iconName={entry.categoryIconName}
-                              label={entry.category}
-                              showDot={!entry.categoryIconName}
-                            />
-                          </td>
-                          <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
-                            {entry.subCategory ? (
-                              <PaymentCategoryBadge
-                                backgroundColor={entry.subCategoryBadgeStyle.backgroundColor}
-                                color={entry.subCategoryBadgeStyle.color}
-                                iconName={entry.subCategoryIconName}
-                                label={entry.subCategory}
-                                showDot={!entry.subCategoryIconName}
-                              />
-                            ) : null}
-                          </td>
-                          <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
-                            <PaymentTypeBadge
-                              direction={entry.direction}
-                              label={getTablePaymentTypeLabel(payment.type)}
-                            />
-                          </td>
-                          <td
+                      paymentRows.map(({ entry, payment }) => {
+                        const isPaymentSelected = selectedPaymentIdSet.has(payment.id);
+
+                        return (
+                          <tr
+                            aria-pressed={isDrawerEditMode ? isPaymentSelected : undefined}
                             className={cn(
-                              "border-t border-[var(--border-color)] px-5 py-4 text-right align-middle text-[13px] font-semibold tabular-nums",
-                              entry.direction === "incoming"
-                                ? "text-[var(--success-green)]"
-                                : "text-[var(--danger-red)]",
+                              "cursor-pointer transition-colors hover:bg-[var(--accent-blue-light)]/45 focus-visible:outline-none",
+                              isPaymentSelectionUiExpanded && isPaymentSelected ? "bg-[var(--accent-blue-light)]" : null,
                             )}
+                            key={payment.id}
+                            onClick={() => handlePaymentRowActivate(payment)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                handlePaymentRowActivate(payment);
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
                           >
-                            {formatSignedAmount(entry.amount, entry.direction)}
-                          </td>
-                        </tr>
-                      ))
+                            <td className={selectionBodyCellClassName}>
+                              <input
+                                aria-label={`Seleccionar pago ${entry.business}`}
+                                checked={isPaymentSelected}
+                                className={selectionCheckboxClassName}
+                                disabled={!isDrawerEditMode}
+                                onChange={() => handlePaymentSelectionToggle(payment.id)}
+                                onClick={(event) => event.stopPropagation()}
+                                onKeyDown={(event) => event.stopPropagation()}
+                                tabIndex={isDrawerEditMode ? 0 : -1}
+                                type="checkbox"
+                              />
+                            </td>
+                            <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle text-[13px] text-[var(--text-primary)]">
+                              {entry.displayDate}
+                            </td>
+                            <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
+                              <div className="flex flex-col justify-center gap-1.5">
+                                <span className="text-[13px] font-medium text-[var(--text-primary)]">{entry.business}</span>
+                                <span className="flex items-center gap-1 text-[12px] text-[var(--text-secondary)]">
+                                  <FileText className="h-3 w-3 text-[var(--text-muted)]" />
+                                  {entry.description}
+                                </span>
+                                {entry.statusLabel ? <ReviewStatusBadge label={entry.statusLabel} /> : null}
+                              </div>
+                            </td>
+                            <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
+                              <PaymentCategoryBadge
+                                backgroundColor={entry.categoryBadgeStyle.backgroundColor}
+                                color={entry.categoryBadgeStyle.color}
+                                iconName={entry.categoryIconName}
+                                label={entry.category}
+                                showDot={!entry.categoryIconName}
+                              />
+                            </td>
+                            <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
+                              {entry.subCategory ? (
+                                <PaymentCategoryBadge
+                                  backgroundColor={entry.subCategoryBadgeStyle.backgroundColor}
+                                  color={entry.subCategoryBadgeStyle.color}
+                                  iconName={entry.subCategoryIconName}
+                                  label={entry.subCategory}
+                                  showDot={!entry.subCategoryIconName}
+                                />
+                              ) : null}
+                            </td>
+                            <td className="border-t border-[var(--border-color)] px-5 py-4 align-middle">
+                              <PaymentTypeBadge
+                                direction={entry.direction}
+                                label={getTablePaymentTypeLabel(payment.type)}
+                              />
+                            </td>
+                            <td
+                              className={cn(
+                                "border-t border-[var(--border-color)] px-5 py-4 text-right align-middle text-[13px] font-semibold tabular-nums",
+                                entry.direction === "incoming"
+                                  ? "text-[var(--success-green)]"
+                                  : "text-[var(--danger-red)]",
+                              )}
+                            >
+                              {formatSignedAmount(entry.amount, entry.direction)}
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -2239,8 +2425,10 @@ export function PaymentsHistoryScreen() {
                       description={entry.description}
                       direction={entry.direction}
                       displayDate={entry.displayDate}
+                      isSelected={selectedPaymentIdSet.has(payment.id)}
+                      isSelectionMode={isPaymentSelectionUiExpanded}
                       key={payment.id}
-                      onClick={() => handlePaymentSelect(payment)}
+                      onClick={() => handlePaymentRowActivate(payment)}
                       paymentTypeLabel={entry.paymentTypeLabel}
                       statusLabel={entry.statusLabel}
                     />

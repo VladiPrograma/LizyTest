@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 export { DateField } from "@/components/ui/date-field";
+export { InlineDropdownSelect } from "@/components/ui/inline-dropdown-select";
+export type { InlineDropdownSelectOption } from "@/components/ui/inline-dropdown-select";
 
 export type SelectFieldOption = {
   label: string;

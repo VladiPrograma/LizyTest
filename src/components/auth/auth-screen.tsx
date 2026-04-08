@@ -20,6 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { AuthInputField } from "@/components/ui/auth-input-field";
 import { Button } from "@/components/ui/button";
 import { DateField } from "@/components/ui/date-field";
 import { useAuth } from "@/components/providers/auth-provider";
@@ -177,39 +178,6 @@ const normalizeUserServiceMessage = (error: unknown) => {
 
   return "No se ha podido completar la solicitud del perfil de usuario.";
 };
-
-function InputShell({
-  icon,
-  type = "text",
-  placeholder,
-  value,
-  onChange,
-  rightAdornment,
-  disabled = false,
-}: {
-  icon: React.ReactNode;
-  type?: string;
-  placeholder: string;
-  value: string;
-  onChange: (value: string) => void;
-  rightAdornment?: React.ReactNode;
-  disabled?: boolean;
-}) {
-  return (
-    <label className="flex h-[48px] items-center rounded-[16px] border border-[var(--neutral-500)] bg-[var(--white)] px-4 text-[var(--neutral-600)] shadow-[0_2px_10px_var(--black-alpha-03)]">
-      <span className="mr-3 flex shrink-0 items-center text-[var(--neutral-600)]">{icon}</span>
-      <input
-        className="w-full border-none bg-transparent text-[16px] font-medium text-[var(--neutral-800)] outline-none placeholder:text-[var(--neutral-600)]"
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        type={type}
-        value={value}
-      />
-      {rightAdornment ? <span className="ml-3 flex shrink-0 items-center">{rightAdornment}</span> : null}
-    </label>
-  );
-}
 
 export function AuthScreen() {
   const { isLoading, login, register, sendPasswordReset, signInWithGoogle, user } = useAuth();
@@ -476,7 +444,7 @@ export function AuthScreen() {
                       mode === "register" ? "translate-y-0" : "-translate-y-2",
                     )}
                   >
-                    <InputShell
+                    <AuthInputField
                       disabled={isAuthFlowBusy}
                       icon={<UserRound className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                       onChange={(value) => updateField("firstName", value)}
@@ -485,7 +453,7 @@ export function AuthScreen() {
                     />
                   </div>
                 </div>
-                <InputShell
+                <AuthInputField
                   disabled={isAuthFlowBusy}
                   icon={<Mail className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                   onChange={(value) => updateField("email", value)}
@@ -494,7 +462,7 @@ export function AuthScreen() {
                   value={form.email}
                 />
                 <div className="mt-4">
-                  <InputShell
+                  <AuthInputField
                     disabled={isAuthFlowBusy}
                     icon={<LockKeyhole className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                     onChange={(value) => updateField("password", value)}
@@ -502,7 +470,7 @@ export function AuthScreen() {
                     rightAdornment={
                       <button
                         aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
-                        className="cursor-pointer border-none bg-transparent p-0 text-[var(--neutral-700)]"
+                        className="cursor-pointer border-none bg-transparent p-0 text-current transition-colors"
                         disabled={isAuthFlowBusy}
                         onClick={(event) => {
                           event.preventDefault();
@@ -616,14 +584,14 @@ export function AuthScreen() {
 
           <form className="mt-4 flex flex-col gap-4" onSubmit={handleOnboardingSubmit}>
             <div className="grid grid-cols-2 gap-4">
-              <InputShell
+              <AuthInputField
                 disabled={isSavingOnboarding}
                 icon={<UserRound className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                 onChange={(value) => updateOnboardingField("name", value)}
                 placeholder="Nombre"
                 value={onboardingForm.name}
               />
-              <InputShell
+              <AuthInputField
                 disabled={isSavingOnboarding}
                 icon={<UserRound className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                 onChange={(value) => updateOnboardingField("lastName", value)}
@@ -633,14 +601,14 @@ export function AuthScreen() {
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <InputShell
+              <AuthInputField
                 disabled={isSavingOnboarding}
                 icon={<MapPinned className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                 onChange={(value) => updateOnboardingField("country", value)}
                 placeholder="País"
                 value={onboardingForm.country}
               />
-              <InputShell
+              <AuthInputField
                 disabled={isSavingOnboarding}
                 icon={<MapPinned className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                 onChange={(value) => updateOnboardingField("city", value)}
@@ -650,7 +618,7 @@ export function AuthScreen() {
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <InputShell
+              <AuthInputField
                 disabled={isSavingOnboarding}
                 icon={<Coins className="h-[18px] w-[18px]" strokeWidth={2.1} />}
                 onChange={(value) => updateOnboardingField("currency", value.toUpperCase())}
@@ -666,6 +634,7 @@ export function AuthScreen() {
                 max={new Date().toISOString().slice(0, 10)}
                 min="1900-01-01"
                 onChange={(value) => updateOnboardingField("birthDate", value)}
+                tone="neutral"
                 value={onboardingForm.birthDate}
               />
             </div>
@@ -705,7 +674,7 @@ export function AuthScreen() {
           </DialogHeader>
 
           <form className="mt-4 flex flex-col" onSubmit={handlePasswordReset}>
-            <InputShell
+            <AuthInputField
               icon={<Mail className="h-[18px] w-[18px]" strokeWidth={2.1} />}
               onChange={setResetEmail}
               placeholder="Correo electrónico"
