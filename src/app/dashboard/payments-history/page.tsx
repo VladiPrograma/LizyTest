@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { PaymentsHistoryScreen } from "@/components/payments-history/payments-history-screen";
+import { PaymentsHistoryScreen } from "@/features/payments-history/payments-history-screen";
 
 export const metadata: Metadata = {
   title: "Payments History | Lizy",

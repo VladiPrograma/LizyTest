@@ -12,8 +12,6 @@ import {
   Building2,
   Calendar,
   CalendarCheck,
-  CalendarDays,
-  CalendarRange,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
@@ -36,7 +34,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { AppDrawer } from "@/components/layout/app-drawer";
+import { DashboardPageShell } from "@/components/layout/dashboard-page-shell";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useToast } from "@/components/providers/toast-provider";
 import { Button } from "@/components/ui/button";
@@ -48,32 +46,42 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  AmountRangeField,
-  CompactSelectField,
-  DateField,
-  InputField,
-  SearchableSelectField,
-  SelectField,
-  type SelectFieldOption,
-} from "@/components/ui/select-field";
+import { DateField } from "@/components/ui/date-field";
+import { InputField } from "@/components/ui/fields/input-field";
+import { CompactSelectField, SelectField } from "@/components/ui/fields/select-field";
+import { SearchableSelectField } from "@/components/ui/fields/searchable-select-field";
+import { type SelectFieldOption } from "@/components/ui/fields/types";
+import { PaymentFilters } from "@/features/payments-history/components/payment-filters";
 import {
   fixedExpenses,
   mortgageSummary,
   rowsPerPageOptions,
   variableExpenses,
-} from "@/components/payments-history/payments-history-data";
+} from "@/features/payments-history/model/payments-history-data";
+import {
+  buildCreatePaymentPayload,
+  buildPaymentUpdatePayload,
+  createEmptyPaymentEditForm,
+  createPaymentEditForm,
+  getPaymentTypeLabel,
+  getTablePaymentTypeLabel,
+  mapPaymentToEntry,
+  normalizeCategoryName,
+  resolveParentCategoryName,
+  toPeriodMonth,
+  validatePaymentEditForm,
+  type BulkUpdateScope,
+  type PaymentEditForm,
+} from "@/features/payments-history/model/payment-model";
+import { usePaymentSelection } from "@/features/payments-history/hooks/use-payment-selection";
 import { bankService, BankServiceError } from "@/services/bank.service";
 import { categoryService, CategoryServiceError, type CategoryDto } from "@/services/category.service";
 import {
   paymentsService,
-  type CreatePaymentPayload,
   PaymentsServiceError,
   type PaymentDto,
-  type PaymentType,
   type PaymentSortField,
   type SortDirection,
-  type UpdatePaymentPayload,
 } from "@/services/payments.service";
 import { userService, type UserDto } from "@/services/user.service";
 import { cn } from "@/lib/utils";
@@ -100,12 +108,6 @@ const ALL_SUBCATEGORIES_LABEL = "Todas las subcategorias";
 const ALL_CATEGORIES_LABEL = "Todas las categorías";
 
 const monthFormatter = new Intl.DateTimeFormat("es-ES", { month: "long", timeZone: "UTC" });
-const displayDateFormatter = new Intl.DateTimeFormat("es-ES", {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-  timeZone: "UTC",
-});
 const monthNameByIndex = Array.from({ length: 12 }, (_, monthIndex) => {
   const monthName = monthFormatter.format(new Date(Date.UTC(2026, monthIndex, 1)));
 
@@ -128,6 +130,7 @@ const defaultSortDirectionByField: Record<PaymentSortField, SortDirection> = {
   description: "ASC",
   needsReview: "DESC",
   operationType: "ASC",
+  subCategory: "ASC",
   type: "ASC",
 };
 const paymentTypeOptions: SelectFieldOption[] = [
@@ -142,12 +145,8 @@ const paymentTypeFormOptions: SelectFieldOption[] = [
   { label: "Selecciona tipo", value: "" },
   ...paymentTypeOptions,
 ];
-const currencyPattern = /^[A-Z]{3}$/;
-const amountEqualityThreshold = 0.000001;
 const paymentSelectionTransitionMs = 220;
 
-type BulkUpdateScope = "same-business" | "same-business-and-amount";
-type DrawerMode = "view" | "edit";
 type PeriodSelection = "Mensual" | "Anual" | "Personalizado";
 type StoredPeriodPreferences = {
   period: PeriodSelection;
@@ -172,107 +171,8 @@ const bulkUpdateScopeOptions: Array<{
   },
 ];
 
-type PaymentEditForm = {
-  date: string;
-  description: string;
-  businessName: string;
-  type: PaymentType | "";
-  amount: string;
-  category: string;
-  subCategory: string;
-  currency: string;
-  updateAll: boolean;
-  bulkUpdateScope: BulkUpdateScope;
-};
-
-type PaymentRowEntry = {
-  amount: number;
-  business: string;
-  category: string;
-  categoryBadgeStyle: {
-    backgroundColor: string;
-    color: string;
-  };
-  categoryIconName?: string;
-  description: string;
-  direction: "incoming" | "outgoing";
-  displayDate: string;
-  id: string;
-  paymentTypeLabel: string;
-  periodMonth: string;
-  periodYear: string;
-  statusLabel?: string;
-  subCategory: string | null;
-  subCategoryBadgeStyle: {
-    backgroundColor: string;
-    color: string;
-  };
-  subCategoryIconName?: string;
-};
-
-const defaultCategoryBadgeStyle = {
-  backgroundColor: "var(--bg-light)",
-  color: "var(--text-secondary)",
-};
-
 const sortCategoriesByName = (categories: CategoryDto[]) =>
   [...categories].sort((left, right) => left.name.localeCompare(right.name, "es"));
-
-function inferNameFromEmail(email: string | null | undefined) {
-  const normalizedEmail = email?.trim();
-
-  if (!normalizedEmail || !normalizedEmail.includes("@")) {
-    return null;
-  }
-
-  const localPart = normalizedEmail.split("@")[0]?.trim();
-
-  if (!localPart) {
-    return null;
-  }
-
-  return localPart
-    .split(/[._-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function getUserDisplayName(authDisplayName: string | null | undefined, authEmail: string | null | undefined, user?: UserDto | null) {
-  const nameParts = [user?.name?.trim(), user?.lastName?.trim()].filter(Boolean);
-
-  if (nameParts.length > 0) {
-    return nameParts.join(" ");
-  }
-
-  if (authDisplayName?.trim() && !authDisplayName.includes("@")) {
-    return authDisplayName.trim();
-  }
-
-  const inferredName = inferNameFromEmail(user?.email || authEmail);
-
-  if (inferredName) {
-    return inferredName;
-  }
-
-  return authDisplayName?.trim() || authEmail?.trim() || "Usuario";
-}
-
-function getUserInitials(name: string) {
-  const nameParts = name
-    .split(" ")
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  if (nameParts.length === 0) {
-    return "U";
-  }
-
-  return nameParts
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join("");
-}
 
 function isValidStoredPeriod(value: unknown): value is PeriodSelection {
   return value === "Mensual" || value === "Anual" || value === "Personalizado";
@@ -346,16 +246,6 @@ function normalizeCategoriesMessage(error: unknown) {
   return "No se pudieron cargar las categorías.";
 }
 
-function toDisplayDate(date: string) {
-  return displayDateFormatter.format(new Date(`${date}T00:00:00Z`));
-}
-
-function toPeriodMonth(date: string) {
-  const monthName = monthFormatter.format(new Date(`${date}T00:00:00Z`));
-
-  return monthName.charAt(0).toUpperCase() + monthName.slice(1);
-}
-
 function getPreviousMonthPeriod(baseDate = new Date()) {
   const previousMonthDate = new Date(Date.UTC(baseDate.getFullYear(), baseDate.getMonth() - 1, 1));
 
@@ -402,231 +292,6 @@ function buildDateRange(
     endDate: `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
     startDate: `${year}-${String(monthIndex + 1).padStart(2, "0")}-01`,
   };
-}
-
-const paymentTypeLabelByValue: Record<PaymentType, string> = {
-  ADD: "Ingreso",
-  DEBT: "Deuda",
-  FIXED_RECURRING: "Pago Recurrente Fijo",
-  LOAN: "Prestamo",
-  SUBTRACT: "Pago",
-  VARIABLE_RECURRING: "Pago Recurrente Variable",
-};
-
-function getPaymentTypeLabel(type: PaymentType) {
-  return paymentTypeLabelByValue[type];
-}
-
-function getTablePaymentTypeLabel(type: PaymentType) {
-  if (type === "FIXED_RECURRING") {
-    return "Pago Fijo";
-  }
-
-  if (type === "VARIABLE_RECURRING") {
-    return "Pago Variable";
-  }
-
-  return getPaymentTypeLabel(type);
-}
-
-function getPaymentDirection(type: PaymentType): "incoming" | "outgoing" {
-  return type === "ADD" ? "incoming" : "outgoing";
-}
-
-function normalizeCategoryName(value: string | null | undefined) {
-  const trimmedValue = value?.trim();
-
-  return trimmedValue ? trimmedValue.toLowerCase() : null;
-}
-
-function mapPaymentToEntry(
-  payment: PaymentDto,
-  categoriesByName: Map<string, CategoryDto>,
-  subcategoriesByName: Map<string, CategoryDto>,
-): PaymentRowEntry {
-  const normalizedCategoryName = normalizeCategoryName(payment.category);
-  const normalizedSubCategoryName = normalizeCategoryName(payment.subCategory);
-  const matchingCategory = normalizedCategoryName ? categoriesByName.get(normalizedCategoryName) : null;
-  const matchingSubCategory = normalizedSubCategoryName ? subcategoriesByName.get(normalizedSubCategoryName) : null;
-
-  return {
-    amount: payment.amount,
-    business: payment.businessName?.trim() || "Sin negocio",
-    category: matchingCategory?.name ?? payment.category?.trim() ?? "Sin categoría",
-    categoryBadgeStyle: matchingCategory
-      ? {
-          backgroundColor: matchingCategory.backgroundColor,
-          color: matchingCategory.color,
-        }
-      : defaultCategoryBadgeStyle,
-    categoryIconName: matchingCategory?.iconName,
-    description: payment.description || (payment.type === "ADD" ? "Ingreso registrado" : "Movimiento registrado"),
-    direction: getPaymentDirection(payment.type),
-    displayDate: toDisplayDate(payment.date),
-    id: payment.id,
-    paymentTypeLabel: getPaymentTypeLabel(payment.type),
-    periodMonth: toPeriodMonth(payment.date),
-    periodYear: payment.date.slice(0, 4),
-    statusLabel: payment.needsReview ? "Pendiente de procesar" : undefined,
-    subCategory: matchingSubCategory?.name ?? payment.subCategory?.trim() ?? null,
-    subCategoryBadgeStyle: matchingSubCategory
-      ? {
-          backgroundColor: matchingSubCategory.backgroundColor,
-          color: matchingSubCategory.color,
-        }
-      : defaultCategoryBadgeStyle,
-    subCategoryIconName: matchingSubCategory?.iconName,
-  };
-}
-
-function resolveParentCategoryName(
-  subCategoryName: string | null | undefined,
-  subcategoriesByName: Map<string, CategoryDto>,
-  categoriesById: Map<string, CategoryDto>,
-) {
-  const normalizedSubCategoryName = normalizeCategoryName(subCategoryName);
-  const matchingSubCategory = normalizedSubCategoryName ? subcategoriesByName.get(normalizedSubCategoryName) : null;
-
-  if (!matchingSubCategory?.parent) {
-    return null;
-  }
-
-  return categoriesById.get(matchingSubCategory.parent)?.name ?? null;
-}
-
-function createPaymentEditForm(
-  payment: PaymentDto,
-  subcategoriesByName: Map<string, CategoryDto>,
-  categoriesById: Map<string, CategoryDto>,
-): PaymentEditForm {
-  const parentCategoryName = resolveParentCategoryName(payment.subCategory, subcategoriesByName, categoriesById);
-
-  return {
-    amount: String(payment.amount),
-    bulkUpdateScope: "same-business",
-    businessName: payment.businessName ?? "",
-    category: parentCategoryName ?? payment.category ?? "",
-    subCategory: payment.subCategory ?? "",
-    currency: payment.currency ?? "",
-    date: payment.date,
-    description: payment.description ?? "",
-    type: payment.type,
-    updateAll: Boolean(payment.businessName?.trim()),
-  };
-}
-
-function createEmptyPaymentEditForm(): PaymentEditForm {
-  return {
-    amount: "",
-    bulkUpdateScope: "same-business",
-    businessName: "",
-    category: "",
-    subCategory: "",
-    currency: "",
-    date: "",
-    description: "",
-    type: "",
-    updateAll: false,
-  };
-}
-
-function normalizeOptionalText(value: string) {
-  const trimmedValue = value.trim();
-
-  return trimmedValue ? trimmedValue : null;
-}
-
-function normalizeCurrency(value: string) {
-  return value.trim().toUpperCase();
-}
-
-function validatePaymentEditForm(form: PaymentEditForm) {
-  if (!form.date) {
-    return "Debes indicar una fecha.";
-  }
-
-  if (!form.type) {
-    return "Debes seleccionar un tipo.";
-  }
-
-  const amount = Number(form.amount);
-
-  if (!form.amount || Number.isNaN(amount) || amount < 0) {
-    return "El importe debe ser un número válido mayor o igual a 0.";
-  }
-
-  const currency = normalizeCurrency(form.currency);
-
-  if (currency && !currencyPattern.test(currency)) {
-    return "La moneda debe usar un código ISO de 3 letras, por ejemplo EUR.";
-  }
-
-  return null;
-}
-
-function buildCreatePaymentPayload(form: PaymentEditForm): CreatePaymentPayload {
-  const normalizedDescription = normalizeOptionalText(form.description);
-  const normalizedBusinessName = normalizeOptionalText(form.businessName);
-  const normalizedCategory = normalizeOptionalText(form.category);
-  const normalizedSubCategory = normalizeOptionalText(form.subCategory);
-  const normalizedCurrency = normalizeCurrency(form.currency);
-
-  return {
-    amount: Number(form.amount),
-    businessName: normalizedBusinessName,
-    category: normalizedCategory,
-    subCategory: normalizedSubCategory,
-    currency: normalizedCurrency || null,
-    date: form.date,
-    description: normalizedDescription,
-    needsReview: false,
-    type: form.type as PaymentType,
-  };
-}
-
-function buildPaymentUpdatePayload(payment: PaymentDto, form: PaymentEditForm): UpdatePaymentPayload {
-  const payload: UpdatePaymentPayload = {};
-  const normalizedDescription = normalizeOptionalText(form.description);
-  const normalizedBusinessName = normalizeOptionalText(form.businessName);
-  const normalizedCategory = normalizeOptionalText(form.category);
-  const normalizedSubCategory = normalizeOptionalText(form.subCategory);
-  const normalizedCurrency = normalizeCurrency(form.currency);
-  const nextCurrency = normalizedCurrency ? normalizedCurrency : null;
-  const nextAmount = Number(form.amount);
-
-  if (form.date !== payment.date) {
-    payload.date = form.date;
-  }
-
-  if (normalizedDescription !== payment.description) {
-    payload.description = normalizedDescription;
-  }
-
-  if (normalizedBusinessName !== payment.businessName) {
-    payload.businessName = normalizedBusinessName;
-  }
-
-  if (form.type && form.type !== payment.type) {
-    payload.type = form.type;
-  }
-
-  if (Math.abs(nextAmount - payment.amount) > amountEqualityThreshold) {
-    payload.amount = nextAmount;
-  }
-
-  if (normalizedCategory !== payment.category) {
-    payload.category = normalizedCategory;
-  }
-
-  if (normalizedSubCategory !== payment.subCategory) {
-    payload.subCategory = normalizedSubCategory;
-  }
-
-  if (nextCurrency !== payment.currency) {
-    payload.currency = nextCurrency;
-  }
-
-  return payload;
 }
 
 function formatEuroAmount(amount: number) {
@@ -889,36 +554,38 @@ function PaymentEditDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[90vh] max-w-[760px] overflow-x-hidden overflow-y-auto rounded-[28px] border border-[var(--border-color)] bg-[var(--bg-white)] p-0 shadow-[0_30px_80px_var(--navy-alpha-20)]">
+      <DialogContent className="max-h-[90vh] max-w-[700px] overflow-x-hidden overflow-y-auto rounded-[18px] border border-[var(--border-color)] bg-[var(--bg-white)] p-0 shadow-[0_30px_80px_var(--navy-alpha-20)] [&>button]:right-6 [&>button]:top-6 [&>button]:h-8 [&>button]:w-8 [&>button]:rounded-full [&>button]:border [&>button]:border-[var(--border-color)] [&>button]:bg-[var(--bg-white)] [&>button]:text-[var(--text-muted)] [&>button]:opacity-100 [&>button]:shadow-none [&>button]:transition-colors hover:[&>button]:border-[var(--blue-200)] hover:[&>button]:text-[var(--text-primary)]">
         {form ? (
-          <div className="space-y-6 p-6 sm:p-7">
-            <DialogHeader className="space-y-2 text-left">
-              <DialogTitle className="text-[24px] font-bold tracking-[-0.03em] text-[var(--text-primary)]">
+          <div className="bg-[var(--bg-white)]">
+            <DialogHeader className="gap-2 border-b border-[var(--cloud-100)] px-6 pb-5 pt-7 text-left sm:px-8">
+              <DialogTitle className="text-[22px] font-bold tracking-[-0.03em] text-[var(--text-primary)]">
                 {isCreateMode ? "Nuevo pago" : "Editar pago"}
               </DialogTitle>
-              <DialogDescription className="text-[14px] leading-6 text-[var(--text-secondary)]">
+              <DialogDescription className="max-w-[540px] text-[13px] leading-5 text-[var(--text-secondary)]">
                 {isCreateMode
                   ? "Completa los datos del movimiento para registrar un nuevo pago manualmente."
                   : "Ajusta los datos del movimiento y decide si quieres propagar los cambios al resto de pagos con el mismo negocio."}
               </DialogDescription>
             </DialogHeader>
 
+            <div className="space-y-5 px-6 py-5 sm:px-8">
+
             {!isCreateMode ? (
-            <div className="rounded-[24px] border border-[var(--payments-soft-blue-border)] bg-[linear-gradient(135deg,var(--payments-soft-blue-panel)_0%,var(--bg-white)_100%)] p-5 shadow-[0_18px_40px_var(--navy-alpha-03)]">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="rounded-[12px] border border-[var(--cloud-100)] bg-[var(--bg-light)] px-4 py-3.5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="space-y-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
                     Pago seleccionado
                   </p>
-                  <div className="flex min-w-0 items-start gap-3">
-                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] bg-[var(--payments-soft-blue-icon)] text-[var(--accent-blue)] ring-1 ring-[var(--payments-soft-blue-border)]">
-                      <Building2 className="h-5 w-5" />
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-[var(--accent-blue-light)] text-[var(--accent-blue)] ring-1 ring-[var(--blue-100)]">
+                      <Building2 className="h-[18px] w-[18px]" />
                     </span>
                     <div className="min-w-0 max-w-[360px] flex-1">
-                      <p className="whitespace-normal break-words text-[18px] font-bold leading-6 tracking-[-0.02em] text-[var(--text-primary)]">
+                      <p className="truncate text-[14px] font-semibold text-[var(--text-primary)]">
                         {currentBusinessName}
                       </p>
-                      <p className="mt-1 break-words text-[13px] text-[var(--text-secondary)]">
+                      <p className="mt-0.5 break-words text-[12px] text-[var(--text-secondary)]">
                         ID {payment.id.slice(0, 8)} · {paymentEntry?.displayDate}
                       </p>
                     </div>
@@ -947,7 +614,7 @@ function PaymentEditDialog({
             </div>
             ) : null}
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2">
               <DateField
                 className="sm:col-span-1"
                 icon={Calendar}
@@ -1024,20 +691,21 @@ function PaymentEditDialog({
                 value={form.description}
               />
             </div>
+            </div>
 
             {!isCreateMode ? (
-              <section className="overflow-hidden rounded-[16px] border border-[var(--border-color)] bg-[var(--bg-white)] shadow-[0_20px_45px_var(--navy-alpha-08)]">
-                <div className="flex flex-col gap-5 px-7 pb-7 pt-7 sm:flex-row sm:items-start sm:justify-between sm:px-8">
+              <section className="border-t border-[var(--cloud-100)] px-6 py-5 sm:px-8">
+                <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
                       ACTUALIZACION MASIVA
                     </p>
-                    <h3 className="mt-2 text-[20px] font-bold tracking-[-0.02em] text-[var(--text-primary)]">
+                    <h3 className="mt-1.5 text-[15px] font-semibold text-[var(--text-primary)]">
                       Actualizar todos los pagos relacionados
                     </h3>
-                    <p className="mt-2 max-w-[440px] text-[14px] leading-[1.5] text-[var(--text-secondary)]">
+                    <p className="mt-1 max-w-[460px] text-[13px] leading-[1.5] text-[var(--text-secondary)]">
                       {canBulkUpdate
-                        ? `Se aplicara usando "${currentBusinessName}" como referencia principal.`
+                        ? `Se aplicara usando ${currentBusinessName} como referencia.`
                         : "Necesitas indicar un negocio en este pago para poder usar esta actualizacion masiva."}
                     </p>
                   </div>
@@ -1060,14 +728,13 @@ function PaymentEditDialog({
                 </div>
 
                 {form.updateAll && canBulkUpdate ? (
-                  <div className="px-7 pb-6 pt-6 sm:px-8">
-                    <div className="h-px bg-[var(--cloud-100)]" />
-                    <div className="pt-6">
+                  <div className="mt-5 border-t border-[var(--cloud-100)] pt-5">
+                    <div>
                       <p className="text-[15px] font-semibold text-[var(--text-primary)]">Alcance de la actualizacion</p>
-                      <p className="mt-2 max-w-[470px] text-[13px] leading-[1.5] text-[var(--text-secondary)]">
+                      <p className="mt-1.5 max-w-[470px] text-[13px] leading-[1.5] text-[var(--text-secondary)]">
                         Elige como localizar los pagos que se actualizaran automaticamente.
                       </p>
-                      <div aria-label="Alcance de la actualizacion" className="mt-5" role="radiogroup">
+                      <div aria-label="Alcance de la actualizacion" className="mt-4" role="radiogroup">
                         {bulkUpdateScopeOptions.map((option, optionIndex) => {
                           const isSelected = form.bulkUpdateScope === option.value;
 
@@ -1108,26 +775,29 @@ function PaymentEditDialog({
               </section>
             ) : null}
 
-            {error ? <p className="text-[13px] font-medium text-[var(--danger-red)]">{error}</p> : null}
+            <div className="border-t border-[var(--cloud-100)] px-6 py-5 sm:px-8">
+              {error ? <p className="pb-4 text-[13px] font-medium text-[var(--danger-red)]">{error}</p> : null}
 
-            <DialogFooter className="gap-3 sm:justify-between">
-              <button
-                className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[var(--border-color)] bg-[var(--bg-white)] px-4 text-[14px] font-semibold text-[var(--text-secondary)] transition-colors hover:border-[var(--blue-200)] hover:text-[var(--text-primary)] disabled:opacity-50"
-                disabled={isSaving}
-                onClick={() => onOpenChange(false)}
-                type="button"
-              >
-                Cancelar
-              </button>
-              <button
-                className="inline-flex h-11 items-center justify-center rounded-[14px] bg-[var(--accent-blue)] px-5 text-[14px] font-semibold text-[var(--white)] shadow-[0_14px_32px_var(--blue-alpha-25)] transition-colors hover:bg-[var(--blue-600)] disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={isSaving}
-                onClick={onSubmit}
-                type="button"
-              >
-                {isSaving ? "Guardando..." : "Guardar cambios"}
-              </button>
-            </DialogFooter>
+              <DialogFooter className="gap-3 sm:justify-between sm:space-x-0">
+                <Button
+                  className="h-10 rounded-[10px] border-[var(--border-color)] px-5 text-[14px] font-semibold text-[var(--text-secondary)] hover:border-[var(--blue-200)] hover:text-[var(--text-primary)]"
+                  disabled={isSaving}
+                  onClick={() => onOpenChange(false)}
+                  type="button"
+                  variant="outline"
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  className="h-10 rounded-[10px] bg-[var(--accent-blue)] px-5 text-[14px] font-semibold text-[var(--white)] shadow-[0_14px_32px_var(--blue-alpha-25)] hover:bg-[var(--blue-600)]"
+                  disabled={isSaving}
+                  onClick={onSubmit}
+                  type="button"
+                >
+                  {isSaving ? "Guardando..." : "Guardar cambios"}
+                </Button>
+              </DialogFooter>
+            </div>
           </div>
         ) : null}
       </DialogContent>
@@ -1177,9 +847,6 @@ export function PaymentsHistoryScreen() {
   const [isSavingPayment, setIsSavingPayment] = useState(false);
   const [paymentEditError, setPaymentEditError] = useState<string | null>(null);
   const [categoriesError, setCategoriesError] = useState<string | null>(null);
-  const [drawerMode, setDrawerMode] = useState<DrawerMode>("view");
-  const [isPaymentSelectionUiExpanded, setIsPaymentSelectionUiExpanded] = useState(false);
-  const [selectedPaymentIds, setSelectedPaymentIds] = useState<string[]>([]);
   const availableYearOptions = selectableYearOptions;
   const availableMonthOptions = selectableMonthOptions;
   const categoriesByName = useMemo(
@@ -1231,12 +898,21 @@ export function PaymentsHistoryScreen() {
     () => payments.map((payment) => ({ entry: mapPaymentToEntry(payment, categoriesByName, subcategoriesByName), payment })),
     [categoriesByName, payments, subcategoriesByName],
   );
-  const isDrawerEditMode = drawerMode === "edit";
-  const selectedPaymentIdSet = useMemo(() => new Set(selectedPaymentIds), [selectedPaymentIds]);
   const visiblePaymentIds = useMemo(() => payments.map((payment) => payment.id), [payments]);
-  const selectedPaymentsCount = selectedPaymentIds.length;
-  const allVisiblePaymentsSelected =
-    visiblePaymentIds.length > 0 && visiblePaymentIds.every((paymentId) => selectedPaymentIdSet.has(paymentId));
+  const {
+    allVisiblePaymentsSelected,
+    drawerMode,
+    isDrawerEditMode,
+    isSelectionUiExpanded: isPaymentSelectionUiExpanded,
+    selectedPaymentIdSet,
+    selectedPaymentsCount,
+    setDrawerMode,
+    togglePaymentSelection,
+    toggleVisiblePaymentsSelection,
+  } = usePaymentSelection({
+    transitionMs: paymentSelectionTransitionMs,
+    visiblePaymentIds,
+  });
   const tableColumnCount = 7;
   const selectionHeaderCellClassName = cn(
     "overflow-hidden py-4 transition-all duration-200 ease-in-out",
@@ -1299,10 +975,12 @@ export function PaymentsHistoryScreen() {
     value: index + 1,
   }));
 
-  const drawerUserName = getUserDisplayName(user?.displayName, user?.email, currentUserProfile);
-  const drawerUserPhotoUrl = currentUserProfile?.profilePhotoUrl || user?.photoURL || null;
-  const drawerUserSubtitle = currentUserProfile?.email || user?.email || "Cuenta activa";
-  const drawerUserInitials = getUserInitials(drawerUserName);
+  const drawerUser = {
+    authDisplayName: user?.displayName,
+    authEmail: user?.email,
+    authPhotoUrl: user?.photoURL,
+    profile: currentUserProfile,
+  };
 
   useEffect(() => {
     if (!categoriesError) {
@@ -1418,7 +1096,7 @@ export function PaymentsHistoryScreen() {
       }
 
       if (subcategoriesResult.status === "fulfilled") {
-        setSubcategories(sortCategoriesByName(subcategoriesResult.value));
+        setSubcategories(subcategoriesResult.value);
       } else {
         setSubcategories([]);
         nextErrors.push(normalizeCategoriesMessage(subcategoriesResult.reason));
@@ -1467,7 +1145,7 @@ export function PaymentsHistoryScreen() {
           return;
         }
 
-        setFilterSubcategories(sortCategoriesByName(nextSubcategories));
+        setFilterSubcategories(nextSubcategories);
       } catch (error) {
         if (cancelled) {
           return;
@@ -1508,30 +1186,6 @@ export function PaymentsHistoryScreen() {
       setCurrentPage(totalPages);
     }
   }, [currentPage, totalPages]);
-
-  useEffect(() => {
-    if (isDrawerEditMode) {
-      const animationFrame = window.requestAnimationFrame(() => {
-        setIsPaymentSelectionUiExpanded(true);
-      });
-
-      return () => window.cancelAnimationFrame(animationFrame);
-    }
-
-    setIsPaymentSelectionUiExpanded(false);
-
-    const clearSelectionTimeout = window.setTimeout(() => {
-      setSelectedPaymentIds([]);
-    }, paymentSelectionTransitionMs);
-
-    return () => window.clearTimeout(clearSelectionTimeout);
-  }, [isDrawerEditMode]);
-
-  useEffect(() => {
-    const visibleIds = new Set(visiblePaymentIds);
-
-    setSelectedPaymentIds((currentPaymentIds) => currentPaymentIds.filter((paymentId) => visibleIds.has(paymentId)));
-  }, [visiblePaymentIds]);
 
   useEffect(() => {
     setPaymentEditForm((currentForm) => {
@@ -1613,7 +1267,7 @@ export function PaymentsHistoryScreen() {
       setPaymentsError(null);
 
       try {
-        const [paymentsPage, summary, groupedBusinesses] = await Promise.all([
+        const [paymentsPage, groupedBusinesses] = await Promise.all([
           paymentsService.listPayments({
             business: businessFilter,
             category: categoryFilter,
@@ -1627,7 +1281,6 @@ export function PaymentsHistoryScreen() {
             startDate,
             subCategory: subCategoryFilter,
           }),
-          paymentsService.getSummary({ endDate, startDate }),
           paymentsService.getGroupByBusiness({ endDate, startDate }),
         ]);
 
@@ -1639,8 +1292,8 @@ export function PaymentsHistoryScreen() {
         setTotalItems(paymentsPage.totalItems);
         setTotalPages(Math.max(1, paymentsPage.totalPages));
         setAvailableBusinessValues(groupedBusinesses.map((group) => group.businessName));
-        setTotalIncoming(summary.find((entry) => entry.type === "ADD")?.totalAmount ?? 0);
-        setTotalOutgoing(summary.find((entry) => entry.type === "SUBTRACT")?.totalAmount ?? 0);
+        setTotalIncoming(paymentsPage.income ?? 0);
+        setTotalOutgoing(paymentsPage.expense ?? 0);
         setHasResolvedPayments(true);
       } catch (error) {
         if (cancelled) {
@@ -1738,32 +1391,16 @@ export function PaymentsHistoryScreen() {
     setCurrentPage(1);
   };
 
-  const handleDrawerModeChange = (mode: DrawerMode) => {
+  const handleDrawerModeChange = (mode: "view" | "edit") => {
     setDrawerMode(mode);
   };
 
   const handlePaymentSelectionToggle = (paymentId: string) => {
-    setSelectedPaymentIds((currentPaymentIds) =>
-      currentPaymentIds.includes(paymentId)
-        ? currentPaymentIds.filter((currentPaymentId) => currentPaymentId !== paymentId)
-        : [...currentPaymentIds, paymentId],
-    );
+    togglePaymentSelection(paymentId);
   };
 
   const handleVisiblePaymentsSelectionToggle = () => {
-    if (visiblePaymentIds.length === 0) {
-      return;
-    }
-
-    setSelectedPaymentIds((currentPaymentIds) => {
-      const visibleIds = new Set(visiblePaymentIds);
-
-      if (visiblePaymentIds.every((paymentId) => currentPaymentIds.includes(paymentId))) {
-        return currentPaymentIds.filter((paymentId) => !visibleIds.has(paymentId));
-      }
-
-      return Array.from(new Set([...currentPaymentIds, ...visiblePaymentIds]));
-    });
+    toggleVisiblePaymentsSelection();
   };
 
   const handlePaymentRowActivate = (payment: PaymentDto) => {
@@ -1999,28 +1636,25 @@ export function PaymentsHistoryScreen() {
   }
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[linear-gradient(135deg,var(--payments-page-background)_0%,var(--payments-page-warm)_100%)] text-[var(--payments-shell-ink)]">
-      <div className="pointer-events-none absolute right-8 top-14 hidden h-[220px] w-[220px] rounded-full bg-[var(--payments-accent-glow)] blur-3xl lg:block" />
-      <div className="pointer-events-none absolute bottom-8 right-16 hidden h-[300px] w-[300px] rounded-full bg-[var(--payments-amber-glow)] blur-3xl lg:block" />
-      <div className="relative flex min-h-screen w-full flex-col bg-[var(--bg-page)] xl:flex-row">
-        <AppDrawer
-          activeLabel="Historial de pagos"
-          avatarBadge="L"
-          footerDescription="Esta app esta en desarrollo. Llevo 3 dias trabajando en esto, si 3 dias. Es probable que encuentres fallos, si esto sucede envia un email: info@visco.uno y respondere cuando pueda. Si me quieres enviar dinero tambien puedes. Un beso!"
-          footerTitle="Version 0.0.1"
-          itemActions={{ "Cerrar sesión": handleLogout }}
-          modeSwitch={{ activeMode: drawerMode, onModeChange: handleDrawerModeChange }}
-          primaryActionDisabled={isPending}
-          primaryActionIcon={Mail}
-          primaryActionLabel="CONTACTA"
-          primaryActionOnClick={handleContact}
-          userInitial={drawerUserInitials.charAt(0)}
-          userName={drawerUserName}
-          userPhotoUrl={drawerUserPhotoUrl}
-          userSubtitle={drawerUserSubtitle}
-        />
-        <section className="flex min-w-0 flex-1 flex-col bg-[var(--bg-page)] p-5 sm:p-6 lg:p-10 xl:ml-[284px] xl:min-h-screen">
-          <div className="flex flex-col gap-7 rounded-[24px] bg-[var(--bg-page)]">
+    <DashboardPageShell
+      activeLabel="Historial de pagos"
+      decorations={
+        <>
+          <div className="pointer-events-none absolute right-8 top-14 hidden h-[220px] w-[220px] rounded-full bg-[var(--payments-accent-glow)] blur-3xl lg:block" />
+          <div className="pointer-events-none absolute bottom-8 right-16 hidden h-[300px] w-[300px] rounded-full bg-[var(--payments-amber-glow)] blur-3xl lg:block" />
+        </>
+      }
+      footerDescription="Esta app esta en fase BEBE todavia. Es probable que encuentres fallos, si esto sucede envia un email: info@visco.uno y respondere cuando pueda. Un beso!"
+      footerTitle="Version 0.0.1"
+      itemActions={{ "Cerrar sesión": handleLogout }}
+      mainClassName="overflow-x-hidden bg-[linear-gradient(135deg,var(--payments-page-background)_0%,var(--payments-page-warm)_100%)] text-[var(--payments-shell-ink)]"
+      modeSwitch={{ activeMode: drawerMode, onModeChange: handleDrawerModeChange }}
+      primaryActionDisabled={isPending}
+      primaryActionIcon={Mail}
+      primaryActionOnClick={handleContact}
+      user={drawerUser}
+    >
+      <div className="flex flex-col gap-7 rounded-[24px] bg-[var(--bg-page)]">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <div className="flex items-center gap-2">
@@ -2060,119 +1694,35 @@ export function PaymentsHistoryScreen() {
                 </Button>
               </div>
             </div>
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                <div className="flex w-full flex-col gap-1.5 lg:max-w-[360px]">
-                  <span className="pl-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-                    Periodo
-                  </span>
-                  <div className="grid h-12 grid-cols-3 gap-1 rounded-[14px] border border-[var(--border-color)] bg-[linear-gradient(180deg,var(--bg-white)_0%,var(--bg-light)_180%)] p-1 shadow-[0_10px_30px_var(--navy-alpha-03)]">
-                    {(["Mensual", "Anual", "Personalizado"] as const).map((value) => (
-                      <button
-                        className={cn(
-                          "flex h-full items-center justify-center rounded-[10px] px-3 text-center text-[13px] font-semibold transition-colors",
-                          period === value
-                            ? "bg-[var(--accent-blue-light)] text-[var(--accent-blue)] shadow-[0_6px_18px_var(--navy-alpha-03)]"
-                            : "text-[var(--text-secondary)] hover:bg-[var(--bg-white)] hover:text-[var(--text-primary)]",
-                        )}
-                        key={value}
-                        onClick={() => handlePeriodChange(value)}
-                        type="button"
-                      >
-                        {value}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex flex-col gap-3 sm:ml-auto sm:w-full sm:max-w-[560px] sm:flex-row sm:flex-wrap sm:justify-end">
-                  {period === "Mensual" ? (
-                    <SelectField
-                      className="w-full sm:w-[190px] sm:shrink-0"
-                      icon={CalendarRange}
-                      label="Mes"
-                      onChange={handleMonthChange}
-                      options={monthSelectOptions}
-                      value={selectedMonth}
-                    />
-                  ) : null}
-                  {period !== "Personalizado" ? (
-                    <SelectField
-                      className="w-full sm:w-[160px] sm:shrink-0"
-                      icon={CalendarDays}
-                      label="Año"
-                      onChange={handleYearChange}
-                      options={yearSelectOptions}
-                      value={selectedYear}
-                    />
-                  ) : (
-                    <>
-                      <DateField
-                        className="w-full sm:w-[190px] sm:shrink-0"
-                        icon={CalendarRange}
-                        label="Desde"
-                        max={customEndDate}
-                        onChange={handleCustomStartDateChange}
-                        value={customStartDate}
-                      />
-                      <DateField
-                        className="w-full sm:w-[190px] sm:shrink-0"
-                        icon={CalendarRange}
-                        label="Hasta"
-                        min={customStartDate}
-                        onChange={handleCustomEndDateChange}
-                        value={customEndDate}
-                      />
-                    </>
-                  )}
-                </div>
-              </div>
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-                <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                    <SearchableSelectField
-                      icon={Tag}
-                      label="Categoría"
-                      onChange={handleCategoryChange}
-                      options={categorySelectOptions}
-                      value={selectedCategory}
-                    />
-                    {hasSelectedFilterCategory ? (
-                      <SearchableSelectField
-                        icon={Shapes}
-                        label="Subcategoria"
-                        onChange={handleSubCategoryChange}
-                        options={subcategorySelectOptions}
-                        value={selectedSubCategory}
-                      />
-                    ) : null}
-                    <SelectField
-                      icon={Building2}
-                      label="Negocio"
-                      onChange={handleBusinessChange}
-                      options={businessSelectOptions}
-                      value={selectedBusiness}
-                    />
-                    <AmountRangeField
-                      icon={BadgeEuro}
-                      label="Importe"
-                      maxValue={maxAmount}
-                      minValue={minAmount}
-                      onChange={handleAmountRangeChange}
-                    />
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-6 text-[14px] font-semibold">
-                  <div className="flex items-center gap-1.5 text-[var(--danger-red)]">
-                    <TrendingDown className="h-4 w-4" />
-                    <span>{formatSignedAmount(totalOutgoing, "outgoing")}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-[var(--success-green)]">
-                    <TrendingUp className="h-4 w-4" />
-                    <span>{formatSignedAmount(totalIncoming, "incoming")}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <PaymentFilters
+              businessSelectOptions={businessSelectOptions}
+              categorySelectOptions={categorySelectOptions}
+              customEndDate={customEndDate}
+              customStartDate={customStartDate}
+              hasSelectedFilterCategory={hasSelectedFilterCategory}
+              maxAmount={maxAmount}
+              minAmount={minAmount}
+              monthSelectOptions={monthSelectOptions}
+              onAmountRangeChange={handleAmountRangeChange}
+              onBusinessChange={handleBusinessChange}
+              onCategoryChange={handleCategoryChange}
+              onCustomEndDateChange={handleCustomEndDateChange}
+              onCustomStartDateChange={handleCustomStartDateChange}
+              onMonthChange={handleMonthChange}
+              onPeriodChange={handlePeriodChange}
+              onSubCategoryChange={handleSubCategoryChange}
+              onYearChange={handleYearChange}
+              period={period}
+              selectedBusiness={selectedBusiness}
+              selectedCategory={selectedCategory}
+              selectedMonth={selectedMonth}
+              selectedSubCategory={selectedSubCategory}
+              selectedYear={selectedYear}
+              subcategorySelectOptions={subcategorySelectOptions}
+              totalIncomingLabel={formatSignedAmount(totalIncoming, "incoming")}
+              totalOutgoingLabel={formatSignedAmount(totalOutgoing, "outgoing")}
+              yearSelectOptions={yearSelectOptions}
+            />
             <div className="relative overflow-hidden rounded-[10px] border border-[var(--border-color)] bg-[var(--bg-white)]">
               {isPaymentsLoading && hasResolvedPayments ? (
                 <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-end p-3">
@@ -2269,10 +1819,13 @@ export function PaymentsHistoryScreen() {
                         />
                       </th>
                       <th className="w-[180px] px-5 py-4 text-[12px] font-semibold tracking-[0.04em] text-[var(--text-secondary)]">
-                        <div className="flex items-center gap-2">
-                          <Shapes className="h-3.5 w-3.5 text-[var(--text-muted)]" />
-                          <span>Subcategoria</span>
-                        </div>
+                        <SortableHeader
+                          active={sortField === "subCategory"}
+                          direction={sortDirection}
+                          icon={Shapes}
+                          label="Subcategoria"
+                          onClick={() => handleSortChange("subCategory")}
+                        />
                       </th>
                       <th className="w-[190px] px-5 py-4 text-[12px] font-semibold tracking-[0.04em] text-[var(--text-secondary)]">
                         <SortableHeader
@@ -2604,8 +2157,6 @@ export function PaymentsHistoryScreen() {
               </article>
             </div>
           </div>
-        </section>
-      </div>
       <PaymentEditDialog
         categoriesByName={categoriesByName}
         categoryOptions={categoryFieldOptions}
@@ -2624,6 +2175,6 @@ export function PaymentsHistoryScreen() {
         subcategoriesByName={subcategoriesByName}
         subcategoryOptions={subcategoryFieldOptions}
       />
-    </main>
+    </DashboardPageShell>
   );
 }

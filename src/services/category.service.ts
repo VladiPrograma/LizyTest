@@ -90,6 +90,9 @@ const validateCategoryCollection = (categories: CategoryDto[]) => {
   return categories;
 };
 
+const sortCategoriesByName = (categories: CategoryDto[]) =>
+  categories.toSorted((left, right) => left.name.localeCompare(right.name, "es"));
+
 const validateCreatePayload = (payload: CreateCategoryPayload) => {
   ensureNonEmpty("name", payload.name);
   ensureOptionalNonEmpty("parent", payload.parent ?? undefined);
@@ -136,7 +139,7 @@ class CategoryService {
     try {
       const categories = await this.request<CategoryDto[]>("/subcategories", { method: "GET" });
 
-      return validateCategoryCollection(categories);
+      return sortCategoriesByName(validateCategoryCollection(categories));
     } catch (error) {
       throw mapSubcategoryRequestError(error, "Subcategorias no encontradas.");
     }
@@ -150,7 +153,7 @@ class CategoryService {
     try {
       const categories = await this.request<CategoryDto[]>(`/${parentId}/subcategories`, { method: "GET" });
 
-      return validateCategoryCollection(categories);
+      return sortCategoriesByName(validateCategoryCollection(categories));
     } catch (error) {
       throw mapSubcategoryRequestError(error, "Subcategorias no encontradas para la categoria seleccionada.");
     }

@@ -14,57 +14,24 @@ import {
   UserRound,
   Wallet,
 } from "lucide-react";
-import { AppDrawer } from "@/components/layout/app-drawer";
+import { DashboardPageShell } from "@/components/layout/dashboard-page-shell";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useToast } from "@/components/providers/toast-provider";
 import { Button } from "@/components/ui/button";
-import { DateField, InputField } from "@/components/ui/select-field";
-import { userService, UserServiceError, type UpdateUserPayload, type UserDto } from "@/services/user.service";
+import { DateField } from "@/components/ui/date-field";
+import { InputField } from "@/components/ui/fields/input-field";
+import {
+  buildUpdatePayload,
+  buildUserSettingsForm,
+  validateUserSettingsForm,
+  type UserSettingsForm,
+} from "@/components/user-settings/user-settings-form-model";
+import { userService, UserServiceError, type UserDto } from "@/services/user.service";
 import { cn } from "@/lib/utils";
 
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const currencyPattern = /^[A-Z]{3}$/;
 const contactEmail = "mdumitruvlad@gmail.com";
-
-type UserSettingsForm = {
-  email: string;
-  name: string;
-  lastName: string;
-  country: string;
-  city: string;
-  currency: string;
-  timeZone: string;
-  locale: string;
-  birthDate: string;
-  profilePhotoUrl: string;
-};
-
-function normalizeOptionalText(value: string) {
-  const trimmedValue = value.trim();
-
-  return trimmedValue ? trimmedValue : null;
-}
-
-function normalizeCurrency(value: string) {
-  const trimmedValue = value.trim().toUpperCase();
-
-  return trimmedValue ? trimmedValue : null;
-}
-
-function buildUserSettingsForm(profile: UserDto | null, authEmail: string | null | undefined): UserSettingsForm {
-  return {
-    birthDate: profile?.birthDate ?? "",
-    city: profile?.city ?? "",
-    country: profile?.country ?? "",
-    currency: profile?.currency ?? "",
-    email: profile?.email ?? authEmail ?? "",
-    lastName: profile?.lastName ?? "",
-    locale: profile?.locale ?? "",
-    name: profile?.name ?? "",
-    profilePhotoUrl: profile?.profilePhotoUrl ?? "",
-    timeZone: profile?.timeZone ?? "",
-  };
-}
+const drawerFooterTitle = "Configuración de usuario";
+const drawerFooterDescription = "Revisa y actualiza tus datos personales, regionales y de perfil desde una única pantalla.";
 
 function normalizeUserMessage(error: unknown) {
   if (error instanceof UserServiceError) {
@@ -76,96 +43,6 @@ function normalizeUserMessage(error: unknown) {
   }
 
   return "No se pudo guardar el usuario.";
-}
-
-function validateUserSettingsForm(form: UserSettingsForm) {
-  if (form.email.trim() && !emailPattern.test(form.email.trim())) {
-    return "El email no tiene un formato válido.";
-  }
-
-  if (form.currency.trim() && !currencyPattern.test(form.currency.trim().toUpperCase())) {
-    return "La moneda debe usar un código ISO de 3 letras, por ejemplo EUR.";
-  }
-
-  if (form.profilePhotoUrl.trim()) {
-    try {
-      new URL(form.profilePhotoUrl.trim());
-    } catch {
-      return "La URL de la foto de perfil no es válida.";
-    }
-  }
-
-  return null;
-}
-
-function buildUpdatePayload(profile: UserDto | null, form: UserSettingsForm): UpdateUserPayload {
-  const payload: UpdateUserPayload = {};
-  const normalizedEmail = normalizeOptionalText(form.email);
-  const normalizedName = normalizeOptionalText(form.name);
-  const normalizedLastName = normalizeOptionalText(form.lastName);
-  const normalizedCountry = normalizeOptionalText(form.country);
-  const normalizedCity = normalizeOptionalText(form.city);
-  const normalizedCurrency = normalizeCurrency(form.currency);
-  const normalizedTimeZone = normalizeOptionalText(form.timeZone);
-  const normalizedLocale = normalizeOptionalText(form.locale);
-  const normalizedProfilePhotoUrl = normalizeOptionalText(form.profilePhotoUrl);
-  const nextBirthDate = form.birthDate.trim() || null;
-
-  if (normalizedEmail !== profile?.email) {
-    payload.email = normalizedEmail ?? undefined;
-  }
-
-  if (normalizedName !== profile?.name) {
-    payload.name = normalizedName ?? undefined;
-  }
-
-  if (normalizedLastName !== profile?.lastName) {
-    payload.lastName = normalizedLastName ?? undefined;
-  }
-
-  if (normalizedCountry !== profile?.country) {
-    payload.country = normalizedCountry ?? undefined;
-  }
-
-  if (normalizedCity !== profile?.city) {
-    payload.city = normalizedCity ?? undefined;
-  }
-
-  if (normalizedCurrency !== profile?.currency) {
-    payload.currency = normalizedCurrency ?? undefined;
-  }
-
-  if (normalizedTimeZone !== profile?.timeZone) {
-    payload.timeZone = normalizedTimeZone ?? undefined;
-  }
-
-  if (normalizedLocale !== profile?.locale) {
-    payload.locale = normalizedLocale ?? undefined;
-  }
-
-  if (nextBirthDate !== profile?.birthDate) {
-    payload.birthDate = nextBirthDate ?? undefined;
-  }
-
-  if (normalizedProfilePhotoUrl !== profile?.profilePhotoUrl) {
-    payload.profilePhotoUrl = normalizedProfilePhotoUrl ?? undefined;
-  }
-
-  return payload;
-}
-
-function getUserDisplayName(profile: UserDto | null, authName: string | null | undefined, authEmail: string | null | undefined) {
-  const fullName = [profile?.name?.trim(), profile?.lastName?.trim()].filter(Boolean).join(" ");
-
-  if (fullName) {
-    return fullName;
-  }
-
-  if (authName?.trim() && !authName.includes("@")) {
-    return authName.trim();
-  }
-
-  return authEmail?.trim() || "Usuario";
 }
 
 export function UserSettingsScreen() {
@@ -285,76 +162,57 @@ export function UserSettingsScreen() {
     );
   }
 
-  const drawerUserName = getUserDisplayName(currentUserProfile, user?.displayName, user?.email);
-  const drawerUserPhotoUrl = currentUserProfile?.profilePhotoUrl || user?.photoURL || null;
-  const drawerUserSubtitle = currentUserProfile?.email || user?.email || "Cuenta activa";
-  const drawerUserInitial = drawerUserName.charAt(0).toUpperCase() || "U";
-  const drawer = (
-    <AppDrawer
-      activeLabel="Usuario"
-      avatarBadge="L"
-      footerDescription="Revisa y actualiza tus datos personales, regionales y de perfil desde una única pantalla."
-      footerTitle="Configuración de usuario"
-      itemActions={{ "Cerrar sesión": handleLogout }}
-      primaryActionDisabled={isPending}
-      primaryActionIcon={Mail}
-      primaryActionLabel="CONTACTA"
-      primaryActionOnClick={handleContact}
-      userInitial={drawerUserInitial}
-      userName={drawerUserName}
-      userPhotoUrl={drawerUserPhotoUrl}
-      userSubtitle={drawerUserSubtitle}
-    />
-  );
+  const drawerUser = {
+    authDisplayName: user?.displayName,
+    authEmail: user?.email,
+    authPhotoUrl: user?.photoURL,
+    inferNameFromEmail: false,
+    profile: currentUserProfile,
+  };
 
   if (isLoadingProfile) {
     return (
-      <main className="flex min-h-screen bg-[var(--bg-page)]">
-        {drawer}
+      <DashboardPageShell
+        activeLabel="Usuario"
+        footerDescription={drawerFooterDescription}
+        footerTitle={drawerFooterTitle}
+        itemActions={{ "Cerrar sesión": handleLogout }}
+        primaryActionDisabled={isPending}
+        primaryActionOnClick={handleContact}
+        user={drawerUser}
+      >
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-7">
+          <header className="space-y-3">
+            <div className="h-5 w-48 animate-pulse rounded-full bg-[var(--neutral-300)]" />
+            <div className="space-y-3">
+              <div className="h-9 w-72 animate-pulse rounded-full bg-[var(--neutral-300)]" />
+              <div className="h-5 w-full max-w-2xl animate-pulse rounded-full bg-[var(--neutral-300)]" />
+            </div>
+          </header>
 
-        <section className="flex min-w-0 flex-1 flex-col bg-[var(--bg-page)] p-5 sm:p-6 lg:p-10 xl:ml-[284px] xl:min-h-screen">
-          <div className="mx-auto flex w-full max-w-5xl flex-col gap-7">
-            <header className="space-y-3">
-              <div className="h-5 w-48 animate-pulse rounded-full bg-[var(--neutral-300)]" />
-              <div className="space-y-3">
-                <div className="h-9 w-72 animate-pulse rounded-full bg-[var(--neutral-300)]" />
-                <div className="h-5 w-full max-w-2xl animate-pulse rounded-full bg-[var(--neutral-300)]" />
-              </div>
-            </header>
-
-            <div className="rounded-[26px] border border-[var(--border-color)] bg-[var(--bg-white)] p-5 shadow-[0_24px_60px_var(--navy-alpha-08)] sm:p-6">
-              <div className="grid gap-4 sm:grid-cols-2">
-                {Array.from({ length: 10 }, (_, index) => (
-                  <div className="h-16 animate-pulse rounded-[14px] bg-[var(--neutral-100)]" key={index} />
-                ))}
-              </div>
+          <div className="rounded-[26px] border border-[var(--border-color)] bg-[var(--bg-white)] p-5 shadow-[0_24px_60px_var(--navy-alpha-08)] sm:p-6">
+            <div className="grid gap-4 sm:grid-cols-2">
+              {Array.from({ length: 10 }, (_, index) => (
+                <div className="h-16 animate-pulse rounded-[14px] bg-[var(--neutral-100)]" key={index} />
+              ))}
             </div>
           </div>
-        </section>
-      </main>
+        </div>
+      </DashboardPageShell>
     );
   }
 
   return (
-    <main className="flex min-h-screen bg-[var(--bg-page)]">
-      <AppDrawer
-        activeLabel="Usuario"
-        avatarBadge="L"
-        footerDescription="Revisa y actualiza tus datos personales, regionales y de perfil desde una única pantalla."
-        footerTitle="Configuración de usuario"
-        itemActions={{ "Cerrar sesión": handleLogout }}
-        primaryActionDisabled={isPending}
-        primaryActionIcon={Mail}
-        primaryActionLabel="CONTACTA"
-        primaryActionOnClick={handleContact}
-        userInitial={drawerUserInitial}
-        userName={drawerUserName}
-        userPhotoUrl={drawerUserPhotoUrl}
-        userSubtitle={drawerUserSubtitle}
-      />
-
-      <section className="flex min-w-0 flex-1 flex-col bg-[var(--bg-page)] p-5 sm:p-6 lg:p-10 xl:ml-[284px] xl:min-h-screen">
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-7">
+    <DashboardPageShell
+      activeLabel="Usuario"
+      footerDescription={drawerFooterDescription}
+      footerTitle={drawerFooterTitle}
+      itemActions={{ "Cerrar sesión": handleLogout }}
+      primaryActionDisabled={isPending}
+      primaryActionOnClick={handleContact}
+      user={drawerUser}
+    >
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-7">
           <header className="space-y-3">
             <div className="flex items-center gap-2 text-[13px] font-medium text-[var(--text-secondary)]">
               <Link className="transition-colors hover:text-[var(--text-primary)]" href="/dashboard/payments-history">
@@ -500,8 +358,7 @@ export function UserSettingsScreen() {
               </div>
             </div>
           </div>
-        </div>
-      </section>
-    </main>
+      </div>
+    </DashboardPageShell>
   );
 }

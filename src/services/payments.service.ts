@@ -23,6 +23,7 @@ const SORT_FIELD_MAP = {
   description: "description",
   needsReview: "needsReview",
   operationType: "operationType",
+  subCategory: "subCategory",
   type: "operationType",
 } as const;
 
@@ -44,6 +45,8 @@ export type PaymentDto = {
 };
 
 export type PagedResult<T> = {
+  expense: number;
+  income: number;
   items: T[];
   page: number;
   size: number;
@@ -74,6 +77,10 @@ export type UpdatePaymentPayload = {
   currency?: string | null;
   needsReview?: boolean | null;
   forAll?: boolean;
+};
+
+export type DeletePaymentsPayload = {
+  paymentIds: string[];
 };
 
 export type ListPaymentsParams = {
@@ -228,6 +235,18 @@ const validateUpdatePayload = (payload: UpdatePaymentPayload) => {
 
   if (!hasMutatingField) {
     throw new Error("At least one payment field is required to update.");
+  }
+};
+
+const validateDeletePayload = (payload: DeletePaymentsPayload) => {
+  if (!Array.isArray(payload.paymentIds) || payload.paymentIds.length === 0) {
+    throw new Error("paymentIds must contain at least one payment id.");
+  }
+
+  for (const paymentId of payload.paymentIds) {
+    if (typeof paymentId !== "string" || !paymentId.trim()) {
+      throw new Error("Each payment id must be a non-empty string.");
+    }
   }
 };
 
@@ -393,14 +412,23 @@ class PaymentsService {
     return payment;
   }
 
+  async deletePayments(payload: DeletePaymentsPayload) {
+    validateDeletePayload(payload);
+
+    await this.request<void>("", {
+      method: "DELETE",
+      body: JSON.stringify({
+        paymentIds: payload.paymentIds,
+      }),
+    });
+  }
+
   async deletePayment(paymentId: string) {
     if (!paymentId.trim()) {
       throw new Error("paymentId is required.");
     }
 
-    await this.request<void>(`/${paymentId}`, {
-      method: "DELETE",
-    });
+    await this.deletePayments({ paymentIds: [paymentId] });
   }
 
   async getPayment(paymentId: string) {
