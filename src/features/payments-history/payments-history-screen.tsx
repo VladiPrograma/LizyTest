@@ -1719,8 +1719,8 @@ export function PaymentsHistoryScreen() {
               selectedSubCategory={selectedSubCategory}
               selectedYear={selectedYear}
               subcategorySelectOptions={subcategorySelectOptions}
-              totalIncomingLabel={formatSignedAmount(totalIncoming, "incoming")}
-              totalOutgoingLabel={formatSignedAmount(totalOutgoing, "outgoing")}
+              totalIncomingLabel={formatEuroAmount(totalIncoming)}
+              totalOutgoingLabel={formatEuroAmount(totalOutgoing)}
               yearSelectOptions={yearSelectOptions}
             />
             <div className="relative overflow-hidden rounded-[10px] border border-[var(--border-color)] bg-[var(--bg-white)]">

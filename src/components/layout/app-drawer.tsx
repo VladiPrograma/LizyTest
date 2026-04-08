@@ -157,7 +157,7 @@ export function AppDrawer({
   primaryActionDisabled = false,
 }: AppDrawerProps) {
   return (
-    <aside className="flex w-full shrink-0 flex-col gap-5 bg-[linear-gradient(180deg,var(--payments-drawer-start)_0%,var(--payments-drawer-end)_100%)] px-6 py-7 text-[var(--white)] xl:fixed xl:inset-y-0 xl:left-0 xl:z-30 xl:h-screen xl:w-[284px] xl:overflow-y-auto xl:overscroll-contain">
+    <aside className="flex w-full shrink-0 flex-col gap-5 bg-[linear-gradient(180deg,var(--payments-drawer-start)_0%,var(--payments-drawer-end)_100%)] px-6 py-7 text-[var(--white)] xl:fixed xl:inset-y-0 xl:left-0 xl:z-30 xl:h-screen xl:w-[284px]">
       <div className="flex items-center gap-3">
         {userPhotoUrl ? (
           <div

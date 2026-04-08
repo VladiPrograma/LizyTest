@@ -7,8 +7,6 @@ import {
   CalendarRange,
   Shapes,
   Tag,
-  TrendingDown,
-  TrendingUp,
 } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
 import { AmountRangeField } from "@/components/ui/fields/amount-range-field";
@@ -78,6 +76,20 @@ export function PaymentFilters({
   totalOutgoingLabel,
   yearSelectOptions,
 }: PaymentFiltersProps) {
+  const parseTotalLabel = (value: string) => {
+    const normalizedValue = value.trim().replace(/^[+-]/, "");
+    const [currency = "", ...amountPartsReversed] = normalizedValue.split(" ").reverse();
+    const amount = amountPartsReversed.reverse().join(" ");
+
+    return {
+      amount,
+      currency,
+    };
+  };
+
+  const outgoingTotal = parseTotalLabel(totalOutgoingLabel);
+  const incomingTotal = parseTotalLabel(totalIncomingLabel);
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -145,7 +157,7 @@ export function PaymentFilters({
           )}
         </div>
       </div>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:gap-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
             <SearchableSelectField
@@ -180,14 +192,27 @@ export function PaymentFilters({
             />
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-6 text-[14px] font-semibold">
-          <div className="flex items-center gap-1.5 text-[var(--danger-red)]">
-            <TrendingDown className="h-4 w-4" />
-            <span>{totalOutgoingLabel}</span>
+        <div className="flex h-12 w-fit items-center gap-4 self-start xl:self-auto">
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--danger-red)]" />
+            <div className="flex items-end gap-[5px] whitespace-nowrap">
+              <span className="text-[12px] font-medium leading-none text-[var(--text-secondary)]">Gastos</span>
+              <span className="text-[15px] font-bold leading-none tracking-[-0.01em] text-[var(--text-primary)] tabular-nums">
+                {outgoingTotal.amount}
+              </span>
+              <span className="text-[11px] font-medium leading-none text-[var(--text-muted)]">{outgoingTotal.currency}</span>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 text-[var(--success-green)]">
-            <TrendingUp className="h-4 w-4" />
-            <span>{totalIncomingLabel}</span>
+          <span className="h-5 w-px shrink-0 bg-[var(--border-color)]" />
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--success-green)]" />
+            <div className="flex items-end gap-[5px] whitespace-nowrap">
+              <span className="text-[12px] font-medium leading-none text-[var(--text-secondary)]">Ingresos</span>
+              <span className="text-[15px] font-bold leading-none tracking-[-0.01em] text-[var(--text-primary)] tabular-nums">
+                {incomingTotal.amount}
+              </span>
+              <span className="text-[11px] font-medium leading-none text-[var(--text-muted)]">{incomingTotal.currency}</span>
+            </div>
           </div>
         </div>
       </div>
