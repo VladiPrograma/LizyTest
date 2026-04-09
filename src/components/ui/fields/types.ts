@@ -30,6 +30,7 @@ export type InputFieldProps = {
   value: string;
   onChange: (value: string) => void;
   className?: string;
+  disabled?: boolean;
   type?: "text" | "number";
   min?: string;
   max?: string;

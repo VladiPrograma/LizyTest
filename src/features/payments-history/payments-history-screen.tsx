@@ -15,9 +15,11 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleAlert,
+  Coins,
   Download,
   Droplets,
   FileText,
+  Hash,
   House,
   Mail,
   Pencil,
@@ -63,15 +65,17 @@ import {
   buildPaymentUpdatePayload,
   createEmptyPaymentEditForm,
   createPaymentEditForm,
-  getPaymentTypeLabel,
   getTablePaymentTypeLabel,
   mapPaymentToEntry,
   normalizeCategoryName,
   resolveParentCategoryName,
+  toDisplayDate,
   toPeriodMonth,
   validatePaymentEditForm,
   type BulkUpdateScope,
   type PaymentEditForm,
+  type RecurrencePreset,
+  isRecurringPaymentType,
 } from "@/features/payments-history/model/payment-model";
 import { usePaymentSelection } from "@/features/payments-history/hooks/use-payment-selection";
 import { bankService, BankServiceError } from "@/services/bank.service";
@@ -89,6 +93,10 @@ import { cn } from "@/lib/utils";
 const euroFormatter = new Intl.NumberFormat("es-ES", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
+});
+const decimalMetricFormatter = new Intl.NumberFormat("es-ES", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 1,
 });
 
 const fixedExpenseIconMap: Record<string, LucideIcon> = {
@@ -145,6 +153,14 @@ const paymentTypeFormOptions: SelectFieldOption[] = [
   { label: "Selecciona tipo", value: "" },
   ...paymentTypeOptions,
 ];
+const recurrencePresetOptions: Array<{ label: string; value: RecurrencePreset }> = [
+  { label: "Cada mes", value: "1" },
+  { label: "2 meses", value: "2" },
+  { label: "3 meses", value: "3" },
+  { label: "6 meses", value: "6" },
+  { label: "1 ano", value: "12" },
+  { label: "Personalizado", value: "custom" },
+];
 const paymentSelectionTransitionMs = 220;
 
 type PeriodSelection = "Mensual" | "Anual" | "Personalizado";
@@ -173,6 +189,57 @@ const bulkUpdateScopeOptions: Array<{
 
 const sortCategoriesByName = (categories: CategoryDto[]) =>
   [...categories].sort((left, right) => left.name.localeCompare(right.name, "es"));
+
+function parseOptionalNonNegativeNumber(value: string) {
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue) {
+    return null;
+  }
+
+  const parsedValue = Number(trimmedValue.replace(",", "."));
+
+  if (Number.isNaN(parsedValue) || parsedValue < 0) {
+    return null;
+  }
+
+  return parsedValue;
+}
+
+function formatMetricValue(value: number) {
+  return decimalMetricFormatter.format(Math.round(value * 10) / 10);
+}
+
+function resolveRecurrenceIntervalInMonths(form: PaymentEditForm | null) {
+  if (!form || !isRecurringPaymentType(form.type)) {
+    return null;
+  }
+
+  if (form.recurrencePreset === "custom") {
+    const customMonths = parseOptionalNonNegativeNumber(form.customRecurrenceMonths);
+
+    return customMonths !== null && Number.isInteger(customMonths) && customMonths > 0 ? customMonths : null;
+  }
+
+  return Number(form.recurrencePreset);
+}
+
+function addMonthsToIsoDate(value: string, monthsToAdd: number) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
+  }
+
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + monthsToAdd, date.getUTCDate()))
+    .toISOString()
+    .slice(0, 10);
+}
 
 function isValidStoredPeriod(value: unknown): value is PeriodSelection {
   return value === "Mensual" || value === "Anual" || value === "Personalizado";
@@ -527,6 +594,7 @@ function PaymentEditDialog({
   onBulkScopeChange,
   onOpenChange,
   onSubmit,
+  onToggleLoan,
   onToggleUpdateAll,
 }: {
   categoriesByName: Map<string, CategoryDto>;
@@ -544,6 +612,7 @@ function PaymentEditDialog({
   onBulkScopeChange: (value: BulkUpdateScope) => void;
   onOpenChange: (open: boolean) => void;
   onSubmit: () => void;
+  onToggleLoan: () => void;
   onToggleUpdateAll: () => void;
 }) {
   const isCreateMode = !payment;
@@ -551,10 +620,42 @@ function PaymentEditDialog({
   const paymentEntry = payment ? mapPaymentToEntry(payment, categoriesByName, subcategoriesByName) : null;
   const currentBusinessName = payment?.businessName?.trim() || "Sin negocio";
   const hasSelectedParentCategory = Boolean(form?.category.trim());
+  const selectedPaymentAmountLabel = paymentEntry?.direction === "incoming" ? "Ingreso" : "Gasto";
+  const selectedPaymentAmountToneClassName =
+    paymentEntry?.direction === "incoming" ? "text-[var(--success-green)]" : "text-[var(--danger-red)]";
+  const selectedPaymentAmountDotClassName =
+    paymentEntry?.direction === "incoming" ? "bg-[var(--success-green)]" : "bg-[var(--danger-red)]";
+  const selectedPaymentAmountValue = payment ? euroFormatter.format(payment.amount) : "";
+  const selectedPaymentCurrency = payment?.currency?.trim() || "EUR";
+  const isRecurringSectionVisible = form ? isRecurringPaymentType(form.type) : false;
+  const isCustomRecurrenceSelected = form?.recurrencePreset === "custom";
+  const loanPaidAmount = parseOptionalNonNegativeNumber(form?.loanPaidAmount ?? "");
+  const loanTotalAmount = parseOptionalNonNegativeNumber(form?.loanTotalAmount ?? "");
+  const installmentAmount = parseOptionalNonNegativeNumber(form?.amount ?? "");
+  const recurrenceIntervalInMonths = resolveRecurrenceIntervalInMonths(form);
+  const remainingLoanAmount =
+    loanPaidAmount !== null && loanTotalAmount !== null ? Math.max(0, loanTotalAmount - loanPaidAmount) : null;
+  const progressRatio =
+    loanPaidAmount !== null && loanTotalAmount && loanTotalAmount > 0 ? Math.min(1, loanPaidAmount / loanTotalAmount) : 0;
+  const progressPercentage = progressRatio * 100;
+  const paidInstallments =
+    installmentAmount && installmentAmount > 0 && loanPaidAmount !== null
+      ? Math.max(0, Math.floor((loanPaidAmount + 0.000001) / installmentAmount))
+      : null;
+  const totalInstallments =
+    installmentAmount && installmentAmount > 0 && loanTotalAmount !== null
+      ? Math.max(1, Math.ceil((loanTotalAmount - 0.000001) / installmentAmount))
+      : null;
+  const remainingInstallments =
+    totalInstallments !== null && paidInstallments !== null ? Math.max(0, totalInstallments - paidInstallments) : null;
+  const lastLoanPaymentDate =
+    form?.date && recurrenceIntervalInMonths !== null && remainingInstallments !== null
+      ? addMonthsToIsoDate(form.date, remainingInstallments * recurrenceIntervalInMonths)
+      : null;
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[90vh] max-w-[700px] overflow-x-hidden overflow-y-auto rounded-[18px] border border-[var(--border-color)] bg-[var(--bg-white)] p-0 shadow-[0_30px_80px_var(--navy-alpha-20)] [&>button]:right-6 [&>button]:top-6 [&>button]:h-8 [&>button]:w-8 [&>button]:rounded-full [&>button]:border [&>button]:border-[var(--border-color)] [&>button]:bg-[var(--bg-white)] [&>button]:text-[var(--text-muted)] [&>button]:opacity-100 [&>button]:shadow-none [&>button]:transition-colors hover:[&>button]:border-[var(--blue-200)] hover:[&>button]:text-[var(--text-primary)]">
+      <DialogContent className="max-h-[90vh] max-w-[700px] overflow-x-hidden overflow-y-auto rounded-[18px] border border-[var(--border-color)] bg-[var(--bg-white)] p-0 shadow-[0_30px_80px_var(--navy-alpha-20)] [&>button]:right-6 [&>button]:top-6 [&>button]:h-auto [&>button]:w-auto [&>button]:border-0 [&>button]:bg-transparent [&>button]:text-[var(--text-muted)] [&>button]:opacity-100 [&>button]:shadow-none [&>button]:transition-colors hover:[&>button]:bg-transparent hover:[&>button]:text-[var(--text-primary)]">
         {form ? (
           <div className="bg-[var(--bg-white)]">
             <DialogHeader className="gap-2 border-b border-[var(--cloud-100)] px-6 pb-5 pt-7 text-left sm:px-8">
@@ -572,12 +673,12 @@ function PaymentEditDialog({
 
             {!isCreateMode ? (
             <div className="rounded-[12px] border border-[var(--cloud-100)] bg-[var(--bg-light)] px-4 py-3.5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
                     Pago seleccionado
                   </p>
-                  <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
                     <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-[var(--accent-blue-light)] text-[var(--accent-blue)] ring-1 ring-[var(--blue-100)]">
                       <Building2 className="h-[18px] w-[18px]" />
                     </span>
@@ -585,31 +686,43 @@ function PaymentEditDialog({
                       <p className="truncate text-[14px] font-semibold text-[var(--text-primary)]">
                         {currentBusinessName}
                       </p>
-                      <p className="mt-0.5 break-words text-[12px] text-[var(--text-secondary)]">
+                      {paymentEntry ? (
+                        <div className="mt-1.5">
+                          <PaymentCategoryBadge
+                            backgroundColor={paymentEntry.categoryBadgeStyle.backgroundColor}
+                            color={paymentEntry.categoryBadgeStyle.color}
+                            iconName={paymentEntry.categoryIconName}
+                            label={paymentEntry.category}
+                          />
+                        </div>
+                      ) : null}
+                      <p className="mt-2 break-words text-[12px] text-[var(--text-secondary)]">
                         ID {payment.id.slice(0, 8)} · {paymentEntry?.displayDate}
                       </p>
                     </div>
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                  {paymentEntry ? (
-                    <>
-                      <PaymentTypeBadge
-                        direction={paymentEntry.direction}
-                        label={paymentEntry.paymentTypeLabel ?? getPaymentTypeLabel(payment.type)}
-                      />
-                      <span className="inline-flex h-[26px] items-center rounded-full border border-[var(--border-color)] bg-[var(--bg-white)] px-3 text-[12px] font-semibold text-[var(--text-primary)]">
-                        {formatSignedAmount(payment.amount, paymentEntry.direction)}
+                {paymentEntry ? (
+                  <div className="flex items-center gap-2 self-start sm:self-center">
+                    <span className={cn("h-2 w-2 shrink-0 rounded-full", selectedPaymentAmountDotClassName)} />
+                    <div className="flex items-end gap-[5px] whitespace-nowrap">
+                      <span className="text-[12px] font-medium leading-none text-[var(--text-secondary)]">
+                        {selectedPaymentAmountLabel}
                       </span>
-                      <PaymentCategoryBadge
-                        backgroundColor={paymentEntry.categoryBadgeStyle.backgroundColor}
-                        color={paymentEntry.categoryBadgeStyle.color}
-                        iconName={paymentEntry.categoryIconName}
-                        label={paymentEntry.category}
-                      />
-                    </>
-                  ) : null}
-                </div>
+                      <span
+                        className={cn(
+                          "text-[15px] font-bold leading-none tracking-[-0.01em] tabular-nums",
+                          selectedPaymentAmountToneClassName,
+                        )}
+                      >
+                        {selectedPaymentAmountValue}
+                      </span>
+                      <span className={cn("text-[11px] font-medium leading-none", selectedPaymentAmountToneClassName)}>
+                        {selectedPaymentCurrency}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
             ) : null}
@@ -691,13 +804,157 @@ function PaymentEditDialog({
                 value={form.description}
               />
             </div>
+
+            {isRecurringSectionVisible ? (
+              <section className="space-y-4 border-t border-[var(--cloud-100)] pt-5">
+                <div>
+                  <p className="pl-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                    Recurrencia
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {recurrencePresetOptions.map((option) => {
+                      const isSelected = form.recurrencePreset === option.value;
+
+                      return (
+                        <button
+                          aria-pressed={isSelected}
+                          className={cn(
+                            "rounded-full border px-4 py-2 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_var(--blue-alpha-25)]",
+                            isSelected
+                              ? "border-[var(--accent-blue)] bg-[var(--accent-blue)] text-[var(--white)]"
+                              : "border-[var(--border-color)] bg-[var(--bg-white)] text-[var(--text-primary)] hover:border-[var(--blue-200)] hover:text-[var(--accent-blue)]",
+                          )}
+                          key={option.value}
+                          onClick={() => onFieldChange("recurrencePreset", option.value)}
+                          type="button"
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <InputField
+                  disabled={!isCustomRecurrenceSelected}
+                  icon={Hash}
+                  inputMode="numeric"
+                  label="Meses personalizados"
+                  min="1"
+                  onChange={(value) => onFieldChange("customRecurrenceMonths", value)}
+                  placeholder="Escribe el numero de meses..."
+                  step="1"
+                  type="number"
+                  value={form.customRecurrenceMonths}
+                />
+
+                <button
+                  aria-pressed={form.isLoan}
+                  className={cn(
+                    "flex w-full items-start gap-3 rounded-[14px] border px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_var(--blue-alpha-25)]",
+                    form.isLoan
+                      ? "border-[var(--accent-blue)] bg-[var(--accent-blue-light)]"
+                      : "border-[var(--border-color)] bg-[var(--bg-white)] hover:border-[var(--blue-200)]",
+                  )}
+                  onClick={onToggleLoan}
+                  type="button"
+                >
+                  <span
+                    className={cn(
+                      "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] border transition-colors",
+                      form.isLoan
+                        ? "border-[var(--accent-blue)] bg-[var(--accent-blue)] text-[var(--white)]"
+                        : "border-[var(--border-color)] bg-[var(--bg-white)] text-transparent",
+                    )}
+                  >
+                    <span className="h-2.5 w-2.5 rounded-[3px] bg-current" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[14px] font-semibold text-[var(--text-primary)]">Es un prestamo</span>
+                    <span className="mt-1 block text-[12px] leading-[1.5] text-[var(--text-secondary)]">
+                      Marca esta opcion si el pago recurrente corresponde a un prestamo o financiacion.
+                    </span>
+                  </span>
+                </button>
+
+                {form.isLoan ? (
+                  <div className="space-y-4 border-l border-[var(--cloud-100)] pl-4 sm:pl-6">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <InputField
+                        className="sm:col-span-1"
+                        icon={Coins}
+                        inputMode="decimal"
+                        label="Pagado hasta ahora"
+                        min="0"
+                        onChange={(value) => onFieldChange("loanPaidAmount", value)}
+                        placeholder="153,00"
+                        step="0.01"
+                        type="number"
+                        value={form.loanPaidAmount}
+                      />
+                      <InputField
+                        className="sm:col-span-1"
+                        icon={Wallet}
+                        inputMode="decimal"
+                        label="Total a pagar"
+                        min="0"
+                        onChange={(value) => onFieldChange("loanTotalAmount", value)}
+                        placeholder="1224,00"
+                        step="0.01"
+                        type="number"
+                        value={form.loanTotalAmount}
+                      />
+                    </div>
+
+                    <div className="rounded-[14px] border border-[var(--cloud-100)] bg-[var(--bg-light)] px-4 py-3.5">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-[12px] font-medium text-[var(--text-secondary)]">Progreso</p>
+                        {totalInstallments !== null && paidInstallments !== null ? (
+                          <p className="text-[12px] font-semibold text-[var(--accent-blue)]">
+                            {formatMetricValue(progressPercentage)}% · {formatMetricValue(paidInstallments)} de{" "}
+                            {formatMetricValue(totalInstallments)} cuotas
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--border-color)]">
+                        <div
+                          className="h-full rounded-full bg-[var(--accent-blue)] transition-[width] duration-200"
+                          style={{ width: `${Math.max(0, Math.min(100, progressPercentage))}%` }}
+                        />
+                      </div>
+                      {loanPaidAmount !== null && loanTotalAmount !== null ? (
+                        <div className="mt-3 flex flex-col gap-1 text-[11px] text-[var(--text-secondary)] sm:flex-row sm:items-center sm:justify-between">
+                          <span>
+                            {euroFormatter.format(loanPaidAmount)} EUR pagados de {euroFormatter.format(loanTotalAmount)} EUR
+                          </span>
+                          <span>
+                            {remainingLoanAmount !== null
+                              ? `${euroFormatter.format(remainingLoanAmount)} EUR pendientes`
+                              : null}
+                          </span>
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-[11px] text-[var(--text-secondary)]">
+                          Introduce el importe pagado, el total y la cuota para calcular el progreso.
+                        </p>
+                      )}
+                      {lastLoanPaymentDate ? (
+                        <p className="mt-2 text-[11px] font-medium text-[var(--text-secondary)]">
+                          Ultimo pago estimado: {toDisplayDate(lastLoanPaymentDate)}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
             </div>
 
             {!isCreateMode ? (
               <section className="border-t border-[var(--cloud-100)] px-6 py-5 sm:px-8">
                 <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
                       ACTUALIZACION MASIVA
                     </p>
                     <h3 className="mt-1.5 text-[15px] font-semibold text-[var(--text-primary)]">
@@ -805,6 +1062,84 @@ function PaymentEditDialog({
   );
 }
 
+function DeleteSelectedPaymentsDialog({
+  isDeleting,
+  onConfirm,
+  onOpenChange,
+  open,
+  selectedCount,
+}: {
+  isDeleting: boolean;
+  onConfirm: () => void;
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+  selectedCount: number;
+}) {
+  const title = selectedCount === 1 ? "Eliminar pago" : `Eliminar ${selectedCount} pagos`;
+  const description =
+    selectedCount === 1
+      ? "Se eliminará el pago seleccionado de forma permanente. Esta acción no se puede deshacer."
+      : `Se eliminarán ${selectedCount} pagos seleccionados de forma permanente. Esta acción no se puede deshacer.`;
+
+  return (
+    <Dialog
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen && isDeleting) {
+          return;
+        }
+
+        onOpenChange(nextOpen);
+      }}
+      open={open}
+    >
+      <DialogContent className="max-w-[460px] rounded-[18px] border border-[var(--border-color)] bg-[var(--bg-white)] p-0 shadow-[0_30px_80px_var(--navy-alpha-20)] [&>button]:right-5 [&>button]:top-5 [&>button]:h-auto [&>button]:w-auto [&>button]:border-0 [&>button]:bg-transparent [&>button]:text-[var(--text-muted)] [&>button]:opacity-100 [&>button]:shadow-none hover:[&>button]:bg-transparent hover:[&>button]:text-[var(--text-primary)]">
+        <div className="px-6 pb-6 pt-7 sm:px-7">
+          <DialogHeader className="text-left">
+            <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-[14px] bg-[color:color-mix(in_srgb,var(--danger-red)_12%,white)] text-[var(--danger-red)]">
+              <Trash2 className="h-5 w-5" />
+            </div>
+            <DialogTitle className="text-[22px] font-bold tracking-[-0.03em] text-[var(--text-primary)]">
+              {title}
+            </DialogTitle>
+            <DialogDescription className="pt-1 text-[13px] leading-5 text-[var(--text-secondary)]">
+              {description}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-6 rounded-[14px] border border-[color:color-mix(in_srgb,var(--danger-red)_18%,var(--border-color))] bg-[color:color-mix(in_srgb,var(--danger-red)_4%,white)] px-4 py-3">
+            <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+              Resumen
+            </p>
+            <p className="mt-1.5 text-[14px] font-medium text-[var(--text-primary)]">
+              {selectedCount === 1 ? "1 pago seleccionado" : `${selectedCount} pagos seleccionados`}
+            </p>
+          </div>
+
+          <DialogFooter className="mt-6 gap-3 sm:justify-between sm:space-x-0">
+            <Button
+              className="h-10 rounded-[10px] border-[var(--border-color)] px-5 text-[14px] font-semibold text-[var(--text-secondary)] hover:border-[var(--blue-200)] hover:text-[var(--text-primary)]"
+              disabled={isDeleting}
+              onClick={() => onOpenChange(false)}
+              type="button"
+              variant="outline"
+            >
+              Cancelar
+            </Button>
+            <Button
+              className="h-10 rounded-[10px] bg-[var(--danger-red)] px-5 text-[14px] font-semibold text-[var(--white)] shadow-[0_14px_32px_rgba(220,38,38,0.18)] hover:bg-[color:color-mix(in_srgb,var(--danger-red)_88%,black)]"
+              disabled={isDeleting}
+              onClick={onConfirm}
+              type="button"
+            >
+              {isDeleting ? "Eliminando..." : "Eliminar"}
+            </Button>
+          </DialogFooter>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function PaymentsHistoryScreen() {
   const { isAuthenticated, isLoading, logout, user } = useAuth();
   const { showError, showSuccess } = useToast();
@@ -844,7 +1179,9 @@ export function PaymentsHistoryScreen() {
   const [selectedPayment, setSelectedPayment] = useState<PaymentDto | null>(null);
   const [paymentEditForm, setPaymentEditForm] = useState<PaymentEditForm | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isSavingPayment, setIsSavingPayment] = useState(false);
+  const [isDeletingSelectedPayments, setIsDeletingSelectedPayments] = useState(false);
   const [paymentEditError, setPaymentEditError] = useState<string | null>(null);
   const [categoriesError, setCategoriesError] = useState<string | null>(null);
   const availableYearOptions = selectableYearOptions;
@@ -904,6 +1241,7 @@ export function PaymentsHistoryScreen() {
     drawerMode,
     isDrawerEditMode,
     isSelectionUiExpanded: isPaymentSelectionUiExpanded,
+    selectedPaymentIds,
     selectedPaymentIdSet,
     selectedPaymentsCount,
     setDrawerMode,
@@ -1392,6 +1730,10 @@ export function PaymentsHistoryScreen() {
   };
 
   const handleDrawerModeChange = (mode: "view" | "edit") => {
+    if (mode !== "edit") {
+      setIsDeleteDialogOpen(false);
+    }
+
     setDrawerMode(mode);
   };
 
@@ -1401,6 +1743,57 @@ export function PaymentsHistoryScreen() {
 
   const handleVisiblePaymentsSelectionToggle = () => {
     toggleVisiblePaymentsSelection();
+  };
+
+  const handleDeleteDialogOpenChange = (open: boolean) => {
+    if (!open && isDeletingSelectedPayments) {
+      return;
+    }
+
+    setIsDeleteDialogOpen(open);
+  };
+
+  const handleSelectedPaymentsDeleteClick = () => {
+    if (!isDrawerEditMode || selectedPaymentIds.length === 0 || isDeletingSelectedPayments) {
+      return;
+    }
+
+    setIsDeleteDialogOpen(true);
+  };
+
+  const handleSelectedPaymentsDelete = async () => {
+    if (!isDrawerEditMode || selectedPaymentIds.length === 0 || isDeletingSelectedPayments) {
+      return;
+    }
+
+    const selectedCount = selectedPaymentIds.length;
+
+    setIsDeletingSelectedPayments(true);
+
+    try {
+      await paymentsService.deletePayments({ paymentIds: selectedPaymentIds });
+
+      const remainingItems = Math.max(0, totalItems - selectedCount);
+      const nextTotalPages = Math.max(1, Math.ceil(remainingItems / rowsPerPage));
+      const nextPage = Math.min(currentPage, nextTotalPages);
+
+      if (nextPage !== currentPage) {
+        setCurrentPage(nextPage);
+      } else {
+        setReloadKey((value) => value + 1);
+      }
+
+      showSuccess(
+        selectedCount === 1
+          ? "Pago eliminado correctamente."
+          : `${selectedCount} pagos eliminados correctamente.`,
+      );
+      setIsDeleteDialogOpen(false);
+    } catch (error) {
+      showError(normalizePaymentsMessage(error));
+    } finally {
+      setIsDeletingSelectedPayments(false);
+    }
   };
 
   const handlePaymentRowActivate = (payment: PaymentDto) => {
@@ -1504,6 +1897,16 @@ export function PaymentsHistoryScreen() {
         };
       }
 
+      if (field === "type") {
+        const nextType = value as PaymentEditForm["type"];
+
+        return {
+          ...currentForm,
+          type: nextType,
+          isLoan: nextType === "LOAN",
+        };
+      }
+
       return { ...currentForm, [field]: value };
     });
   };
@@ -1541,6 +1944,26 @@ export function PaymentsHistoryScreen() {
 
   const handleBulkScopeChange = (value: BulkUpdateScope) => {
     setPaymentEditForm((currentForm) => (currentForm ? { ...currentForm, bulkUpdateScope: value } : currentForm));
+  };
+
+  const handleToggleLoan = () => {
+    setPaymentEditForm((currentForm) => {
+      if (!currentForm) {
+        return currentForm;
+      }
+
+      const nextIsLoan = !currentForm.isLoan;
+
+      return {
+        ...currentForm,
+        isLoan: nextIsLoan,
+        type: nextIsLoan
+          ? "LOAN"
+          : currentForm.type === "LOAN"
+            ? "FIXED_RECURRING"
+            : currentForm.type,
+      };
+    });
   };
 
   const handleToggleUpdateAll = () => {
@@ -1751,7 +2174,7 @@ export function PaymentsHistoryScreen() {
                     <div className="flex flex-wrap gap-2">
                       <Button
                         className="h-9 rounded-[8px] bg-[var(--bg-white)] px-3 text-[13px] font-semibold text-[var(--text-primary)] shadow-none ring-1 ring-[var(--border-color)] hover:bg-[var(--accent-blue-light)]"
-                        disabled={!isDrawerEditMode || selectedPaymentsCount === 0}
+                        disabled={!isDrawerEditMode || selectedPaymentsCount === 0 || isDeletingSelectedPayments}
                         title="Pendiente de implementación"
                         type="button"
                       >
@@ -1760,12 +2183,12 @@ export function PaymentsHistoryScreen() {
                       </Button>
                       <Button
                         className="h-9 rounded-[8px] bg-[var(--bg-white)] px-3 text-[13px] font-semibold text-[var(--danger-red)] shadow-none ring-1 ring-[var(--border-color)] hover:bg-[var(--accent-blue-light)]"
-                        disabled={!isDrawerEditMode || selectedPaymentsCount === 0}
-                        title="Pendiente de implementación"
+                        disabled={!isDrawerEditMode || selectedPaymentsCount === 0 || isDeletingSelectedPayments}
+                        onClick={handleSelectedPaymentsDeleteClick}
                         type="button"
                       >
                         <Trash2 className="h-4 w-4" />
-                        Eliminar
+                        {isDeletingSelectedPayments ? "Eliminando..." : "Eliminar"}
                       </Button>
                     </div>
                   </div>
@@ -2157,6 +2580,13 @@ export function PaymentsHistoryScreen() {
               </article>
             </div>
           </div>
+      <DeleteSelectedPaymentsDialog
+        isDeleting={isDeletingSelectedPayments}
+        onConfirm={() => void handleSelectedPaymentsDelete()}
+        onOpenChange={handleDeleteDialogOpenChange}
+        open={isDeleteDialogOpen}
+        selectedCount={selectedPaymentIds.length}
+      />
       <PaymentEditDialog
         categoriesByName={categoriesByName}
         categoryOptions={categoryFieldOptions}
@@ -2169,6 +2599,7 @@ export function PaymentsHistoryScreen() {
         onFieldChange={handlePaymentFormChange}
         onOpenChange={handleEditDialogOpenChange}
         onSubmit={handlePaymentSave}
+        onToggleLoan={handleToggleLoan}
         onToggleUpdateAll={handleToggleUpdateAll}
         open={isEditDialogOpen}
         payment={selectedPayment}

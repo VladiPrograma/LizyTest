@@ -19,6 +19,7 @@ const paymentMonthFormatter = new Intl.DateTimeFormat("es-ES", { month: "long", 
 type PaymentDirection = "incoming" | "outgoing";
 
 export type BulkUpdateScope = "same-business" | "same-business-and-amount";
+export type RecurrencePreset = "1" | "2" | "3" | "6" | "12" | "custom";
 
 export type PaymentEditForm = {
   date: string;
@@ -31,6 +32,11 @@ export type PaymentEditForm = {
   currency: string;
   updateAll: boolean;
   bulkUpdateScope: BulkUpdateScope;
+  recurrencePreset: RecurrencePreset;
+  customRecurrenceMonths: string;
+  isLoan: boolean;
+  loanPaidAmount: string;
+  loanTotalAmount: string;
 };
 
 export type PaymentRowEntry = {
@@ -92,6 +98,10 @@ export function getPaymentDirection(type: PaymentType): PaymentDirection {
   return type === "ADD" ? "incoming" : "outgoing";
 }
 
+export function isRecurringPaymentType(type: PaymentType | "") {
+  return type === "FIXED_RECURRING" || type === "VARIABLE_RECURRING" || type === "LOAN";
+}
+
 export function toDisplayDate(date: string) {
   return paymentDisplayDateFormatter.format(new Date(`${date}T00:00:00Z`));
 }
@@ -121,7 +131,7 @@ export function mapPaymentToEntry(
   return {
     amount: payment.amount,
     business: payment.businessName?.trim() || "Sin negocio",
-    category: matchingCategory?.name ?? payment.category?.trim() ?? "Sin categoría",
+    category: matchingCategory?.name ?? payment.category?.trim() ?? "Sin categorÃ­a",
     categoryBadgeStyle: matchingCategory
       ? {
           backgroundColor: matchingCategory.backgroundColor,
@@ -181,6 +191,11 @@ export function createPaymentEditForm(
     description: payment.description ?? "",
     type: payment.type,
     updateAll: Boolean(payment.businessName?.trim()),
+    recurrencePreset: "1",
+    customRecurrenceMonths: "",
+    isLoan: payment.type === "LOAN",
+    loanPaidAmount: "",
+    loanTotalAmount: "",
   };
 }
 
@@ -196,6 +211,11 @@ export function createEmptyPaymentEditForm(): PaymentEditForm {
     description: "",
     type: "",
     updateAll: false,
+    recurrencePreset: "1",
+    customRecurrenceMonths: "",
+    isLoan: false,
+    loanPaidAmount: "",
+    loanTotalAmount: "",
   };
 }
 
@@ -207,6 +227,14 @@ function normalizeOptionalText(value: string) {
 
 function normalizeCurrency(value: string) {
   return value.trim().toUpperCase();
+}
+
+function resolvePaymentTypeForPayload(form: PaymentEditForm) {
+  if (form.isLoan) {
+    return "LOAN" as PaymentType;
+  }
+
+  return form.type as PaymentType;
 }
 
 export function validatePaymentEditForm(form: PaymentEditForm) {
@@ -221,13 +249,38 @@ export function validatePaymentEditForm(form: PaymentEditForm) {
   const amount = Number(form.amount);
 
   if (!form.amount || Number.isNaN(amount) || amount < 0) {
-    return "El importe debe ser un número válido mayor o igual a 0.";
+    return "El importe debe ser un numero valido mayor o igual a 0.";
   }
 
   const currency = normalizeCurrency(form.currency);
 
   if (currency && !currencyPattern.test(currency)) {
-    return "La moneda debe usar un código ISO de 3 letras, por ejemplo EUR.";
+    return "La moneda debe usar un codigo ISO de 3 letras, por ejemplo EUR.";
+  }
+
+  if (isRecurringPaymentType(form.type) && form.recurrencePreset === "custom") {
+    const customRecurrenceMonths = Number(form.customRecurrenceMonths);
+
+    if (!form.customRecurrenceMonths.trim() || !Number.isInteger(customRecurrenceMonths) || customRecurrenceMonths < 1) {
+      return "Debes indicar un numero entero de meses para la recurrencia personalizada.";
+    }
+  }
+
+  if (form.isLoan) {
+    const paidAmount = Number(form.loanPaidAmount);
+    const totalAmount = Number(form.loanTotalAmount);
+
+    if (!form.loanPaidAmount.trim() || Number.isNaN(paidAmount) || paidAmount < 0) {
+      return "El importe pagado del prestamo debe ser un numero valido mayor o igual a 0.";
+    }
+
+    if (!form.loanTotalAmount.trim() || Number.isNaN(totalAmount) || totalAmount < 0) {
+      return "El importe total del prestamo debe ser un numero valido mayor o igual a 0.";
+    }
+
+    if (totalAmount < paidAmount) {
+      return "El total del prestamo no puede ser menor que la cantidad ya pagada.";
+    }
   }
 
   return null;
@@ -249,7 +302,7 @@ export function buildCreatePaymentPayload(form: PaymentEditForm): CreatePaymentP
     date: form.date,
     description: normalizedDescription,
     needsReview: false,
-    type: form.type as PaymentType,
+    type: resolvePaymentTypeForPayload(form),
   };
 }
 
@@ -262,6 +315,7 @@ export function buildPaymentUpdatePayload(payment: PaymentDto, form: PaymentEdit
   const normalizedCurrency = normalizeCurrency(form.currency);
   const nextCurrency = normalizedCurrency ? normalizedCurrency : null;
   const nextAmount = Number(form.amount);
+  const nextType = resolvePaymentTypeForPayload(form);
 
   if (form.date !== payment.date) {
     payload.date = form.date;
@@ -275,8 +329,8 @@ export function buildPaymentUpdatePayload(payment: PaymentDto, form: PaymentEdit
     payload.businessName = normalizedBusinessName;
   }
 
-  if (form.type && form.type !== payment.type) {
-    payload.type = form.type;
+  if (form.type && nextType !== payment.type) {
+    payload.type = nextType;
   }
 
   if (Math.abs(nextAmount - payment.amount) > amountEqualityThreshold) {

@@ -9,6 +9,7 @@ export function InputField({
   value,
   onChange,
   className,
+  disabled = false,
   type = "text",
   min,
   max,
@@ -27,7 +28,8 @@ export function InputField({
         </span>
         <input
           aria-label={label}
-          className="h-full min-w-0 flex-1 bg-transparent text-[14px] font-semibold text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+          className="h-full min-w-0 flex-1 bg-transparent text-[14px] font-semibold text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] disabled:cursor-not-allowed disabled:text-[var(--text-muted)]"
+          disabled={disabled}
           inputMode={inputMode}
           max={max}
           min={min}

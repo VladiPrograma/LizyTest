@@ -176,11 +176,12 @@ export function PaymentFilters({
                 value={selectedSubCategory}
               />
             ) : null}
-            <SelectField
+            <SearchableSelectField
               icon={Building2}
               label="Negocio"
               onChange={onBusinessChange}
               options={businessSelectOptions}
+              placeholder="Escribe para buscar negocio"
               value={selectedBusiness}
             />
             <AmountRangeField
